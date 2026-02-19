@@ -1,6 +1,6 @@
 #include "Database.hpp"
 
-namespace omnicore::service {
+namespace omnidata::services {
 std::string Database::ExtractError(const char *fn, SQLHANDLE handle,
                                    SQLSMALLINT type) {
   if (!handle) {
@@ -223,7 +223,7 @@ bool Database::RollbackTransaction() {
 }
 
 bool Database::RunPrepared(const std::string &query,
-                           const std::vector<type::SQLParam> &params) {
+                           const std::vector<types::SQLParam> &params) {
   try {
     SQLRETURN retcode;
 
@@ -326,7 +326,7 @@ bool Database::RunPrepared(const std::string &query,
       }
     };
 
-    for (const type::SQLParam &param : params) {
+    for (const types::SQLParam &param : params) {
       ParamVisitor visitor{hstmt,        paramIndex,    indStorage,
                            intStorage,   doubleStorage, stringStorage,
                            binaryStorage};
@@ -364,8 +364,8 @@ bool Database::RunPrepared(const std::string &query,
   }
 }
 
-type::DataTable Database::FetchResults(const std::string &query) {
-  type::DataTable dataTable;
+types::DataTable Database::FetchResults(const std::string &query) {
+  types::DataTable dataTable;
 
   try {
     if (hstmt != SQL_NULL_HSTMT) {
@@ -402,10 +402,10 @@ type::DataTable Database::FetchResults(const std::string &query) {
           std::string(reinterpret_cast<char *>(columnName), columnNameLength);
     }
 
-    std::vector<type::DataTable::Row> rows;
+    std::vector<types::DataTable::Row> rows;
 
     while (SQLFetch(hstmt) == SQL_SUCCESS) {
-      type::DataTable::Row row;
+      types::DataTable::Row row;
       for (SQLUSMALLINT i = 1; i <= columnCount; ++i) {
         SQLLEN indicator = 0;
         SQLSMALLINT nativeType = nativeTypes[i - 1];
@@ -504,10 +504,10 @@ type::DataTable Database::FetchResults(const std::string &query) {
   }
 }
 
-type::DataTable
+types::DataTable
 Database::FetchPrepared(const std::string &query,
                         const std::vector<std::string> &params) {
-  type::DataTable dataTable;
+  types::DataTable dataTable;
 
   try {
     PrepareStatement(query);
@@ -546,10 +546,10 @@ Database::FetchPrepared(const std::string &query,
           std::string(reinterpret_cast<char *>(columnName), columnNameLength);
     }
 
-    std::vector<type::DataTable::Row> rows;
+    std::vector<types::DataTable::Row> rows;
 
     while (SQLFetch(hstmt) == SQL_SUCCESS) {
-      type::DataTable::Row row; // Moved here
+      types::DataTable::Row row; // Moved here
 
       for (SQLUSMALLINT i = 1; i <= columnCount; ++i) {
         SQLLEN indicator = 0;
@@ -638,8 +638,8 @@ Database::FetchPrepared(const std::string &query,
   }
 }
 
-type::DataTable Database::FetchPrepared(const std::string &query,
-                                        const std::string &param) {
+types::DataTable Database::FetchPrepared(const std::string &query,
+                                         const std::string &param) {
   try {
     return FetchPrepared(query, std::vector<std::string>{param});
   } catch (const std::exception &ex) {
@@ -648,10 +648,10 @@ type::DataTable Database::FetchPrepared(const std::string &query,
   }
 }
 
-type::DataTable
+types::DataTable
 Database::FetchPrepared(const std::string &query,
-                        const std::vector<type::SQLParam> &params) {
-  type::DataTable dataTable;
+                        const std::vector<types::SQLParam> &params) {
+  types::DataTable dataTable;
 
   try {
     if (hstmt != SQL_NULL_HSTMT) {
@@ -742,7 +742,7 @@ Database::FetchPrepared(const std::string &query,
       }
     };
 
-    for (const type::SQLParam &param : params) {
+    for (const types::SQLParam &param : params) {
       ParamVisitor visitor{hstmt,        paramIndex,    indStorage,
                            intStorage,   doubleStorage, stringStorage,
                            binaryStorage};
@@ -778,10 +778,10 @@ Database::FetchPrepared(const std::string &query,
           std::string(reinterpret_cast<char *>(columnName), columnNameLength);
     }
 
-    std::vector<type::DataTable::Row> rows;
+    std::vector<types::DataTable::Row> rows;
 
     while (SQLFetch(hstmt) == SQL_SUCCESS) {
-      type::DataTable::Row row; // Moved here
+      types::DataTable::Row row; // Moved here
 
       for (SQLUSMALLINT i = 1; i <= columnCount; ++i) {
         SQLLEN indicator = 0;
@@ -842,4 +842,4 @@ Database::FetchPrepared(const std::string &query,
   }
 };
 
-} // namespace omnicore::service
+} // namespace omnidata::services

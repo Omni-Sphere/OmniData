@@ -11,11 +11,10 @@
 #include <sqlext.h>
 #include <stdexcept>
 
-
 #include "DataTable.hpp"
 #include "SQLParams.hpp"
 
-namespace omnicore::service {
+namespace omnidata::services {
 class Database {
 private:
   SQLHENV henv;
@@ -50,15 +49,15 @@ public:
   bool RunStatement(const std::string &query);
 
   bool RunPrepared(const std::string &query,
-                   const std::vector<type::SQLParam> &params);
+                   const std::vector<types::SQLParam> &params);
 
-  type::DataTable FetchPrepared(const std::string &query,
-                                const std::vector<type::SQLParam> &params);
-  type::DataTable FetchPrepared(const std::string &query,
-                                const std::vector<std::string> &params);
-  type::DataTable FetchPrepared(const std::string &query,
-                                const std::string &param);
-  type::DataTable FetchResults(const std::string &query);
+  types::DataTable FetchPrepared(const std::string &query,
+                                 const std::vector<types::SQLParam> &params);
+  types::DataTable FetchPrepared(const std::string &query,
+                                 const std::vector<std::string> &params);
+  types::DataTable FetchPrepared(const std::string &query,
+                                 const std::string &param);
+  types::DataTable FetchResults(const std::string &query);
 
   bool BeginTransaction();
   bool CommitTransaction();
@@ -67,4 +66,4 @@ public:
   void Disconnect();
 };
 
-} // namespace omnicore::service
+} // namespace omnidata::services
