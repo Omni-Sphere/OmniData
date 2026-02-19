@@ -1,6 +1,6 @@
 #include "Database.hpp"
 
-namespace omnidata::services {
+namespace omnisphere::omnidata::services {
 std::string Database::ExtractError(const char *fn, SQLHANDLE handle,
                                    SQLSMALLINT type) {
   if (!handle) {
@@ -222,8 +222,9 @@ bool Database::RollbackTransaction() {
   }
 }
 
-bool Database::RunPrepared(const std::string &query,
-                           const std::vector<types::SQLParam> &params) {
+bool Database::RunPrepared(
+    const std::string &query,
+    const std::vector<omnisphere::omnidata::types::SQLParam> &params) {
   try {
     SQLRETURN retcode;
 
@@ -326,7 +327,7 @@ bool Database::RunPrepared(const std::string &query,
       }
     };
 
-    for (const types::SQLParam &param : params) {
+    for (const omnisphere::omnidata::types::SQLParam &param : params) {
       ParamVisitor visitor{hstmt,        paramIndex,    indStorage,
                            intStorage,   doubleStorage, stringStorage,
                            binaryStorage};
@@ -364,8 +365,9 @@ bool Database::RunPrepared(const std::string &query,
   }
 }
 
-types::DataTable Database::FetchResults(const std::string &query) {
-  types::DataTable dataTable;
+omnisphere::omnidata::types::DataTable
+Database::FetchResults(const std::string &query) {
+  omnisphere::omnidata::types::DataTable dataTable;
 
   try {
     if (hstmt != SQL_NULL_HSTMT) {
@@ -402,10 +404,10 @@ types::DataTable Database::FetchResults(const std::string &query) {
           std::string(reinterpret_cast<char *>(columnName), columnNameLength);
     }
 
-    std::vector<types::DataTable::Row> rows;
+    std::vector<omnisphere::omnidata::types::DataTable::Row> rows;
 
     while (SQLFetch(hstmt) == SQL_SUCCESS) {
-      types::DataTable::Row row;
+      omnisphere::omnidata::types::DataTable::Row row;
       for (SQLUSMALLINT i = 1; i <= columnCount; ++i) {
         SQLLEN indicator = 0;
         SQLSMALLINT nativeType = nativeTypes[i - 1];
@@ -504,10 +506,10 @@ types::DataTable Database::FetchResults(const std::string &query) {
   }
 }
 
-types::DataTable
+omnisphere::omnidata::types::DataTable
 Database::FetchPrepared(const std::string &query,
                         const std::vector<std::string> &params) {
-  types::DataTable dataTable;
+  omnisphere::omnidata::types::DataTable dataTable;
 
   try {
     PrepareStatement(query);
@@ -546,10 +548,10 @@ Database::FetchPrepared(const std::string &query,
           std::string(reinterpret_cast<char *>(columnName), columnNameLength);
     }
 
-    std::vector<types::DataTable::Row> rows;
+    std::vector<omnisphere::omnidata::types::DataTable::Row> rows;
 
     while (SQLFetch(hstmt) == SQL_SUCCESS) {
-      types::DataTable::Row row; // Moved here
+      omnisphere::omnidata::types::DataTable::Row row; // Moved here
 
       for (SQLUSMALLINT i = 1; i <= columnCount; ++i) {
         SQLLEN indicator = 0;
@@ -638,8 +640,8 @@ Database::FetchPrepared(const std::string &query,
   }
 }
 
-types::DataTable Database::FetchPrepared(const std::string &query,
-                                         const std::string &param) {
+omnisphere::omnidata::types::DataTable
+Database::FetchPrepared(const std::string &query, const std::string &param) {
   try {
     return FetchPrepared(query, std::vector<std::string>{param});
   } catch (const std::exception &ex) {
@@ -648,10 +650,10 @@ types::DataTable Database::FetchPrepared(const std::string &query,
   }
 }
 
-types::DataTable
-Database::FetchPrepared(const std::string &query,
-                        const std::vector<types::SQLParam> &params) {
-  types::DataTable dataTable;
+omnisphere::omnidata::types::DataTable Database::FetchPrepared(
+    const std::string &query,
+    const std::vector<omnisphere::omnidata::types::SQLParam> &params) {
+  omnisphere::omnidata::types::DataTable dataTable;
 
   try {
     if (hstmt != SQL_NULL_HSTMT) {
@@ -742,7 +744,7 @@ Database::FetchPrepared(const std::string &query,
       }
     };
 
-    for (const types::SQLParam &param : params) {
+    for (const omnisphere::omnidata::types::SQLParam &param : params) {
       ParamVisitor visitor{hstmt,        paramIndex,    indStorage,
                            intStorage,   doubleStorage, stringStorage,
                            binaryStorage};
@@ -778,10 +780,10 @@ Database::FetchPrepared(const std::string &query,
           std::string(reinterpret_cast<char *>(columnName), columnNameLength);
     }
 
-    std::vector<types::DataTable::Row> rows;
+    std::vector<omnisphere::omnidata::types::DataTable::Row> rows;
 
     while (SQLFetch(hstmt) == SQL_SUCCESS) {
-      types::DataTable::Row row; // Moved here
+      omnisphere::omnidata::types::DataTable::Row row; // Moved here
 
       for (SQLUSMALLINT i = 1; i <= columnCount; ++i) {
         SQLLEN indicator = 0;
@@ -842,4 +844,4 @@ Database::FetchPrepared(const std::string &query,
   }
 };
 
-} // namespace omnidata::services
+} // namespace omnisphere::omnidata::services

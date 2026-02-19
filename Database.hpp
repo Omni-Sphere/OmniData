@@ -14,7 +14,7 @@
 #include "DataTable.hpp"
 #include "SQLParams.hpp"
 
-namespace omnidata::services {
+namespace omnisphere::omnidata::services {
 class Database {
 private:
   SQLHENV henv;
@@ -48,16 +48,19 @@ public:
   bool Connect();
   bool RunStatement(const std::string &query);
 
-  bool RunPrepared(const std::string &query,
-                   const std::vector<types::SQLParam> &params);
+  bool
+  RunPrepared(const std::string &query,
+              const std::vector<omnisphere::omnidata::types::SQLParam> &params);
 
-  types::DataTable FetchPrepared(const std::string &query,
-                                 const std::vector<types::SQLParam> &params);
-  types::DataTable FetchPrepared(const std::string &query,
-                                 const std::vector<std::string> &params);
-  types::DataTable FetchPrepared(const std::string &query,
-                                 const std::string &param);
-  types::DataTable FetchResults(const std::string &query);
+  omnisphere::omnidata::types::DataTable FetchPrepared(
+      const std::string &query,
+      const std::vector<omnisphere::omnidata::types::SQLParam> &params);
+  omnisphere::omnidata::types::DataTable
+  FetchPrepared(const std::string &query,
+                const std::vector<std::string> &params);
+  omnisphere::omnidata::types::DataTable
+  FetchPrepared(const std::string &query, const std::string &param);
+  omnisphere::omnidata::types::DataTable FetchResults(const std::string &query);
 
   bool BeginTransaction();
   bool CommitTransaction();
@@ -66,4 +69,4 @@ public:
   void Disconnect();
 };
 
-} // namespace omnidata::services
+} // namespace omnisphere::omnidata::services
