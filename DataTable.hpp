@@ -15,7 +15,7 @@
 #include <memory>
 #endif
 
-namespace omnisphere::omnidata::types {
+namespace omnisphere::types {
 class DataTable {
 public:
   class Row {
@@ -190,4 +190,4 @@ private:
   std::vector<std::string> columns;
   std::vector<Row> data;
 };
-} // namespace omnisphere::omnidata::types
+} // namespace omnisphere::types

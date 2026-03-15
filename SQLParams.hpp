@@ -5,7 +5,7 @@
 #include <variant>
 #include <vector>
 
-namespace omnisphere::omnidata::types {
+namespace omnisphere::types {
 
 using SQLParam = std::variant<std::monostate, bool, int, std::string,
                               std::vector<uint8_t>, double>;
@@ -34,4 +34,4 @@ template <typename T, typename = std::enable_if_t<std::is_enum_v<T>>>
 inline SQLParam MakeSQLParam(T val) {
   return SQLParam{static_cast<std::underlying_type_t<T>>(val)};
 }
-} // namespace omnisphere::omnidata::types
+} // namespace omnisphere::types

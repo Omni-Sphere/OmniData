@@ -1,7 +1,7 @@
 #include "DataTable.hpp"
 #include <stdexcept>
 
-namespace omnisphere::omnidata::types {
+namespace omnisphere::types {
 void DataTable::SetColumns(const std::vector<std::string> &cols) {
   columns = cols;
 }
@@ -60,4 +60,4 @@ DataTable::Row::operator[](const std::string &column) const {
 bool DataTable::Row::HasColumn(const std::string &column) const {
   return values.find(column) != values.end();
 }
-} // namespace omnisphere::omnidata::types
+} // namespace omnisphere::types
