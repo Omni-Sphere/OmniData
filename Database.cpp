@@ -64,7 +64,8 @@ bool Database::Connect() {
     std::string connString =
         "Driver={ODBC Driver 18 for SQL Server};Server=" + _ServerName +
         ";UID=" + _UserName + ";PWD=" + _Password +
-        ";Database=" + _DatabaseName + ";TrustServerCertificate=yes;";
+        ";Database=" + _DatabaseName +
+        ";TrustServerCertificate=yes;LoginTimeout=30;";
 
     ret = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &henv);
     if (!SQL_SUCCEEDED(ret))
