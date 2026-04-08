@@ -1,71 +1,63 @@
 #pragma once
 
-#include <iostream>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
-#include <map>
-#include <sql.h>
-#include <sqlext.h>
-#include <stdexcept>
-
-#include "DataTable.hpp"
-#include "SQLParams.hpp"
+#include "IDatabase.hpp"
+#include <memory>
+#include <string>
 
 namespace omnisphere::services {
-class Database {
+
+enum class DatabaseEngine {
+  SQLServer,
+  MySQL
+};
+
+class Database : public IDatabase {
 private:
-  SQLHENV henv;
-  SQLHDBC hdbc;
-  SQLHSTMT hstmt;
-
-  std::string _ServerName;
-  std::string _DatabaseName;
-  std::string _UserName;
-  std::string _Password;
-  bool _TrustServerCertificate;
-
-  void PrepareStatement(const std::string &);
-  std::string ExtractError(const char *, SQLHANDLE, SQLSMALLINT);
-  void RunQuery(const std::string &);
-
-  std::vector<double> doubleStorage;
-  std::vector<std::string> stringStorage;
-  std::vector<std::vector<uint8_t>> binaryStorage;
-  std::vector<int> intStorage;
-  std::vector<SQLLEN> indStorage;
+  std::unique_ptr<IDatabase> _impl;
 
 public:
-  Database();
-  ~Database();
-  void ServerName(const std::string &serverName);
-  void DatabaseName(const std::string &dbName);
-  void UserName(const std::string &userName);
-  void Password(const std::string &password);
-  void TrustServerCertificate(const bool &trustedServerCertificate);
-  bool Connect();
-  bool RunStatement(const std::string &query);
+  Database(DatabaseEngine engine = DatabaseEngine::SQLServer);
+  ~Database() override = default;
 
+  // Delegated IDatabase methods
+  void ConnectionString(const std::string &connectionString) override {
+    _impl->ConnectionString(connectionString);
+  }
+
+  bool Connect() override { return _impl->Connect(); }
+  void Disconnect() override { _impl->Disconnect(); }
+
+  bool RunStatement(const std::string &query) override { return _impl->RunStatement(query); }
   bool RunPrepared(const std::string &query,
-                   const std::vector<omnisphere::types::SQLParam> &params);
+                   const std::vector<omnisphere::types::SQLParam> &params) override {
+    return _impl->RunPrepared(query, params);
+  }
 
   omnisphere::types::DataTable
   FetchPrepared(const std::string &query,
-                const std::vector<omnisphere::types::SQLParam> &params);
+                const std::vector<omnisphere::types::SQLParam> &params) override {
+    return _impl->FetchPrepared(query, params);
+  }
+  
   omnisphere::types::DataTable
   FetchPrepared(const std::string &query,
-                const std::vector<std::string> &params);
-  omnisphere::types::DataTable FetchPrepared(const std::string &query,
-                                             const std::string &param);
-  omnisphere::types::DataTable FetchResults(const std::string &query);
+                const std::vector<std::string> &params) override {
+    return _impl->FetchPrepared(query, params);
+  }
 
-  bool BeginTransaction();
-  bool CommitTransaction();
-  bool RollbackTransaction();
+  omnisphere::types::DataTable 
+  FetchPrepared(const std::string &query,
+                const std::string &param) override {
+    return _impl->FetchPrepared(query, param);
+  }
 
-  void Disconnect();
+  omnisphere::types::DataTable FetchResults(const std::string &query) override {
+    return _impl->FetchResults(query);
+  }
+
+  bool BeginTransaction() override { return _impl->BeginTransaction(); }
+  bool CommitTransaction() override { return _impl->CommitTransaction(); }
+  bool RollbackTransaction() override { return _impl->RollbackTransaction(); }
 };
 
 } // namespace omnisphere::services
