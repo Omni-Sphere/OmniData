@@ -96,14 +96,3 @@ foreach(HDR ${PUBLIC_HEADERS})
         COMMENT "Copiando header: ${REL_PATH}"
     )
 endforeach()
-
-if(UNIX)
-    install(TARGETS OmniData
-        LIBRARY DESTINATION lib/OmniSphere
-        ARCHIVE DESTINATION lib/OmniSphere
-    )
-    
-    install(FILES ${PUBLIC_HEADERS}
-        DESTINATION include/OmniSphere/OmniData
-    )
-endif()
