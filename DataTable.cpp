@@ -1,4 +1,4 @@
-#include "DataTable.hpp"
+#include <DataTable.hpp>
 #include <stdexcept>
 
 namespace omnisphere::types {

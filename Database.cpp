@@ -1,6 +1,6 @@
-#include "Database.hpp"
-#include "SQLServerDatabase.hpp"
-#include "MySQLDatabase.hpp"
+#include <Database.hpp>
+#include <SQLServerDatabase.hpp>
+#include <MySQLDatabase.hpp>
 
 namespace omnisphere::services {
 

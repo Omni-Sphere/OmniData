@@ -1,7 +1,7 @@
 #pragma once
 
-#include "DataTable.hpp"
-#include "SQLParams.hpp"
+#include <DataTable.hpp>
+#include <SQLParams.hpp>
 #include <string>
 #include <vector>
 

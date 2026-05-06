@@ -10,6 +10,9 @@ namespace omnisphere::types {
 using SQLParam = std::variant<std::monostate, bool, int, std::string,
                               std::vector<uint8_t>, double>;
 
+template <typename T> struct is_optional : std::false_type {};
+template <typename T> struct is_optional<std::optional<T>> : std::true_type {};
+
 template <typename T>
 inline SQLParam MakeSQLParam(const std::optional<T> &opt) {
   if (opt.has_value())
