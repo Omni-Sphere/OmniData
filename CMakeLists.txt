@@ -42,6 +42,7 @@ find_package(Boost REQUIRED COMPONENTS json)
 target_link_libraries(OmniData PUBLIC
     ${SODIUM_LIB}
     Boost::json
+    OmniUtils
 )
 
 set_target_properties(OmniData PROPERTIES
