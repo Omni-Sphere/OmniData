@@ -1,8 +1,28 @@
 #include <MySQLDatabase.hpp>
 #include <stdexcept>
 #include <vector>
+#include <Logger.hpp>
+#include <variant>
+#include <SQLParams.hpp>
 
 namespace omnisphere::services {
+
+static void LogSQL(const std::string& context, const std::string& query, const std::vector<omnisphere::types::SQLParam>& params) {
+    std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
+    std::string formattedQuery = omnisphere::types::FormatSQL(query, params);
+    omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "[MySQL] " + ctxStr + formattedQuery);
+}
+
+static void LogSQL(const std::string& context, const std::string& query, const std::vector<std::string>& params) {
+    std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
+    std::string formattedQuery = omnisphere::types::FormatSQL(query, params);
+    omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "[MySQL] " + ctxStr + formattedQuery);
+}
+
+static void LogSQL(const std::string& context, const std::string& query) {
+    std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
+    omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "[MySQL] " + ctxStr + query);
+}
 
 std::string MySQLDatabase::ExtractError(const char *fn, SQLHANDLE handle,
                                        SQLSMALLINT type) {
@@ -123,7 +143,7 @@ void MySQLDatabase::PrepareStatement(const std::string &query) {
   }
 }
 
-bool MySQLDatabase::RunStatement(const std::string &query) {
+bool MySQLDatabase::RunStatement(const std::string &query, const std::string& context) {
   try {
     SQLRETURN ret;
 
@@ -140,6 +160,7 @@ bool MySQLDatabase::RunStatement(const std::string &query) {
 
     ret = SQLExecDirect(hstmt, (SQLCHAR *)query.c_str(), SQL_NTS);
 
+    LogSQL(context, query);
     if (!SQL_SUCCEEDED(ret))
       throw std::runtime_error(
           ExtractError("MySQLDatabase::RunStatement", hstmt, SQL_HANDLE_STMT) +
@@ -212,7 +233,8 @@ bool MySQLDatabase::RollbackTransaction() {
 
 bool MySQLDatabase::RunPrepared(
     const std::string &query,
-    const std::vector<omnisphere::types::SQLParam> &params) {
+    const std::vector<omnisphere::types::SQLParam> &params,
+    const std::string& context) {
   try {
     SQLRETURN retcode;
 
@@ -328,6 +350,7 @@ bool MySQLDatabase::RunPrepared(
 
       paramIndex++;
     }
+    LogSQL(context, query, params);
     retcode = SQLExecute(hstmt);
 
     if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
@@ -343,12 +366,13 @@ bool MySQLDatabase::RunPrepared(
       SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
       hstmt = SQL_NULL_HSTMT;
     }
+    omnisphere::utils::Logger::LogTrace("MySQLDatabase", std::string("RunPrepared Exception: ") + ex.what());
     throw std::runtime_error(std::string("[MySQLDatabase::RunPrepared Exception] ") +
                              ex.what());
   }
 }
 
-omnisphere::types::DataTable MySQLDatabase::FetchResults(const std::string &query) {
+omnisphere::types::DataTable MySQLDatabase::FetchResults(const std::string &query, const std::string& context) {
   omnisphere::types::DataTable dataTable;
 
   try {
@@ -363,6 +387,7 @@ omnisphere::types::DataTable MySQLDatabase::FetchResults(const std::string &quer
           ExtractError("SQLAllocHandle", hdbc, SQL_HANDLE_DBC));
 
     SQLRETURN retcode = SQLExecDirect(hstmt, (SQLCHAR *)query.c_str(), SQL_NTS);
+    LogSQL(context, query);
     if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
       throw std::runtime_error(
           ExtractError("SQLExecDirect", hstmt, SQL_HANDLE_STMT));
@@ -489,7 +514,8 @@ omnisphere::types::DataTable MySQLDatabase::FetchResults(const std::string &quer
 
 omnisphere::types::DataTable
 MySQLDatabase::FetchPrepared(const std::string &query,
-                                 const std::vector<std::string> &params) {
+                                 const std::vector<std::string> &params,
+                                 const std::string& context) {
   omnisphere::types::DataTable dataTable;
 
   try {
@@ -505,6 +531,7 @@ MySQLDatabase::FetchPrepared(const std::string &query,
                                  std::to_string(i + 1));
     }
 
+    LogSQL(context, query, params);
     SQLRETURN retcode = SQLExecute(hstmt);
 
     if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
@@ -622,13 +649,15 @@ MySQLDatabase::FetchPrepared(const std::string &query,
 }
 
 omnisphere::types::DataTable MySQLDatabase::FetchPrepared(const std::string &query,
-                                                             const std::string &param) {
-  return FetchPrepared(query, std::vector<std::string>{param});
+                                                             const std::string &param,
+                                                             const std::string& context) {
+  return FetchPrepared(query, std::vector<std::string>{param}, context);
 }
 
 omnisphere::types::DataTable MySQLDatabase::FetchPrepared(
     const std::string &query,
-    const std::vector<omnisphere::types::SQLParam> &params) {
+    const std::vector<omnisphere::types::SQLParam> &params,
+    const std::string& context) {
   omnisphere::types::DataTable dataTable;
 
   try {
@@ -733,6 +762,7 @@ omnisphere::types::DataTable MySQLDatabase::FetchPrepared(
       ++paramIndex;
     }
 
+    LogSQL(context, query, params);
     retcode = SQLExecute(hstmt);
     if (!SQL_SUCCEEDED(retcode))
       throw std::runtime_error(

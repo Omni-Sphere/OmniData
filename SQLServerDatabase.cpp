@@ -1,8 +1,29 @@
 #include <SQLServerDatabase.hpp>
 #include <stdexcept>
 #include <vector>
+#include <Logger.hpp>
+#include <variant>
+#include <SQLParams.hpp>
 
 namespace omnisphere::services {
+
+static void LogSQL(const std::string& context, const std::string& query, const std::vector<omnisphere::types::SQLParam>& params) {
+    std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
+    std::string formattedQuery = omnisphere::types::FormatSQL(query, params);
+    omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "[SQLServer] " + ctxStr + formattedQuery);
+}
+
+static void LogSQL(const std::string& context, const std::string& query, const std::vector<std::string>& params) {
+    std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
+    std::string formattedQuery = omnisphere::types::FormatSQL(query, params);
+    omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "[SQLServer] " + ctxStr + formattedQuery);
+}
+
+static void LogSQL(const std::string& context, const std::string& query) {
+    std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
+    omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "[SQLServer] " + ctxStr + query);
+}
+
 
 std::string SQLServerDatabase::ExtractError(const char *fn, SQLHANDLE handle,
                                            SQLSMALLINT type) {
@@ -35,16 +56,20 @@ std::string SQLServerDatabase::ExtractError(const char *fn, SQLHANDLE handle,
   return errors;
 }
 
-SQLServerDatabase::SQLServerDatabase()
-    : henv(SQL_NULL_HENV), hdbc(SQL_NULL_HDBC), hstmt(SQL_NULL_HSTMT) {}
+SQLServerDatabase::SQLServerDatabase() : henv(SQL_NULL_HENV), hdbc(SQL_NULL_HDBC), hstmt(SQL_NULL_HSTMT) {
+  omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "SQLServerDatabase Instance Created");
+}
 
-SQLServerDatabase::~SQLServerDatabase() { Disconnect(); }
+SQLServerDatabase::~SQLServerDatabase() {
+  Disconnect();
+}
 
 void SQLServerDatabase::ConnectionString(const std::string &connectionString) {
   this->_ConnectionString = connectionString;
 }
 
 bool SQLServerDatabase::Connect() {
+  omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "Attempting to connect to SQL Server...");
   if (_ConnectionString.empty()) {
     throw std::runtime_error("[SQLServerDatabase::Connect] Connection string is empty.");
   }
@@ -72,9 +97,11 @@ bool SQLServerDatabase::Connect() {
     ret = SQLDriverConnect(hdbc, nullptr, (SQLCHAR *)connString.c_str(),
                            SQL_NTS, nullptr, 0, nullptr, SQL_DRIVER_NOPROMPT);
 
-    if (!SQL_SUCCEEDED(ret))
-      throw std::runtime_error(
-          ExtractError("SQLConnect", hdbc, SQL_HANDLE_DBC));
+    if (!SQL_SUCCEEDED(ret)) {
+      std::string err = ExtractError("SQLConnect", hdbc, SQL_HANDLE_DBC);
+      omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::ERROR, "SQL", "Connection Failed: " + err);
+      throw std::runtime_error(err);
+    }
 
     return true;
   } catch (const std::exception &e) {
@@ -123,7 +150,7 @@ void SQLServerDatabase::PrepareStatement(const std::string &query) {
   }
 }
 
-bool SQLServerDatabase::RunStatement(const std::string &query) {
+bool SQLServerDatabase::RunStatement(const std::string &query, const std::string& context) {
   try {
     SQLRETURN ret;
 
@@ -138,15 +165,18 @@ bool SQLServerDatabase::RunStatement(const std::string &query) {
       throw std::runtime_error(
           ExtractError("SQLAllocHandle", hdbc, SQL_HANDLE_DBC));
 
+    LogSQL(context, query);
     ret = SQLExecDirect(hstmt, (SQLCHAR *)query.c_str(), SQL_NTS);
 
-    if (!SQL_SUCCEEDED(ret))
-      throw std::runtime_error(
-          ExtractError("SQLServerDatabase::RunStatement", hstmt, SQL_HANDLE_STMT) +
-          query + "\n");
+    if (!SQL_SUCCEEDED(ret)) {
+      std::string err = ExtractError("SQLServerDatabase::RunStatement", hstmt, SQL_HANDLE_STMT);
+      omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::ERROR, "SQL", "RunStatement Failed: " + err + "\nQuery: " + query);
+      throw std::runtime_error(err + query + "\n");
+    }
 
     return true;
   } catch (const std::exception &e) {
+    omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::ERROR, "SQL", "Exception in RunStatement: " + std::string(e.what()));
     throw std::runtime_error(std::string("[SQLServerDatabase::RunStatement] ") +
                              e.what());
   }
@@ -212,7 +242,8 @@ bool SQLServerDatabase::RollbackTransaction() {
 
 bool SQLServerDatabase::RunPrepared(
     const std::string &query,
-    const std::vector<omnisphere::types::SQLParam> &params) {
+    const std::vector<omnisphere::types::SQLParam> &params,
+    const std::string& context) {
   try {
     SQLRETURN retcode;
 
@@ -328,11 +359,13 @@ bool SQLServerDatabase::RunPrepared(
 
       paramIndex++;
     }
+    LogSQL(context, query, params);
     retcode = SQLExecute(hstmt);
-
-    if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
-      throw std::runtime_error(
-          ExtractError("SQLExecute", hstmt, SQL_HANDLE_STMT));
+    if (!SQL_SUCCEEDED(retcode)) {
+      std::string err = ExtractError("SQLExecute", hstmt, SQL_HANDLE_STMT);
+      omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::ERROR, "SQL", "RunPrepared Failed: " + err + "\nQuery: " + query);
+      throw std::runtime_error(err);
+    }
 
     SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
     hstmt = SQL_NULL_HSTMT;
@@ -343,12 +376,13 @@ bool SQLServerDatabase::RunPrepared(
       SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
       hstmt = SQL_NULL_HSTMT;
     }
+    omnisphere::utils::Logger::LogTrace("SQLServerDatabase", std::string("RunPrepared Exception: ") + ex.what());
     throw std::runtime_error(std::string("[SQLServerDatabase::RunPrepared Exception] ") +
                              ex.what());
   }
 }
 
-omnisphere::types::DataTable SQLServerDatabase::FetchResults(const std::string &query) {
+omnisphere::types::DataTable SQLServerDatabase::FetchResults(const std::string &query, const std::string& context) {
   omnisphere::types::DataTable dataTable;
 
   try {
@@ -362,10 +396,13 @@ omnisphere::types::DataTable SQLServerDatabase::FetchResults(const std::string &
       throw std::runtime_error(
           ExtractError("SQLAllocHandle", hdbc, SQL_HANDLE_DBC));
 
+    LogSQL(context, query);
     SQLRETURN retcode = SQLExecDirect(hstmt, (SQLCHAR *)query.c_str(), SQL_NTS);
-    if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
-      throw std::runtime_error(
-          ExtractError("SQLExecDirect", hstmt, SQL_HANDLE_STMT));
+    if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO) {
+      std::string err = ExtractError("SQLExecDirect", hstmt, SQL_HANDLE_STMT);
+      omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::ERROR, "SQL", "FetchResults Failed: " + err + "\nQuery: " + query);
+      throw std::runtime_error(err);
+    }
 
     SQLSMALLINT columnCount;
     SQLNumResultCols(hstmt, &columnCount);
@@ -489,7 +526,8 @@ omnisphere::types::DataTable SQLServerDatabase::FetchResults(const std::string &
 
 omnisphere::types::DataTable
 SQLServerDatabase::FetchPrepared(const std::string &query,
-                                 const std::vector<std::string> &params) {
+                                 const std::vector<std::string> &params,
+                                 const std::string& context) {
   omnisphere::types::DataTable dataTable;
 
   try {
@@ -505,11 +543,14 @@ SQLServerDatabase::FetchPrepared(const std::string &query,
                                  std::to_string(i + 1));
     }
 
+    LogSQL(context, query, params);
     SQLRETURN retcode = SQLExecute(hstmt);
 
-    if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
-      throw std::runtime_error(
-          ExtractError("SQLExecute", hstmt, SQL_HANDLE_STMT));
+    if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO) {
+      std::string err = ExtractError("SQLExecute", hstmt, SQL_HANDLE_STMT);
+      omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::ERROR, "SQL", "FetchPrepared Failed: " + err + "\nQuery: " + query);
+      throw std::runtime_error(err);
+    }
 
     SQLSMALLINT columnCount;
     SQLNumResultCols(hstmt, &columnCount);
@@ -622,13 +663,15 @@ SQLServerDatabase::FetchPrepared(const std::string &query,
 }
 
 omnisphere::types::DataTable SQLServerDatabase::FetchPrepared(const std::string &query,
-                                                             const std::string &param) {
-  return FetchPrepared(query, std::vector<std::string>{param});
+                                                             const std::string &param,
+                                                             const std::string& context) {
+  return FetchPrepared(query, std::vector<std::string>{param}, context);
 }
 
 omnisphere::types::DataTable SQLServerDatabase::FetchPrepared(
     const std::string &query,
-    const std::vector<omnisphere::types::SQLParam> &params) {
+    const std::vector<omnisphere::types::SQLParam> &params,
+    const std::string& context) {
   omnisphere::types::DataTable dataTable;
 
   try {
@@ -733,10 +776,13 @@ omnisphere::types::DataTable SQLServerDatabase::FetchPrepared(
       ++paramIndex;
     }
 
+    LogSQL(context, query, params);
     retcode = SQLExecute(hstmt);
-    if (!SQL_SUCCEEDED(retcode))
-      throw std::runtime_error(
-          ExtractError("SQLExecute", hstmt, SQL_HANDLE_STMT));
+    if (!SQL_SUCCEEDED(retcode)) {
+      std::string err = ExtractError("SQLExecute", hstmt, SQL_HANDLE_STMT);
+      omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::ERROR, "SQL", "RunPrepared Failed: " + err + "\nQuery: " + query);
+      throw std::runtime_error(err);
+    }
 
     SQLSMALLINT columnCount;
     SQLNumResultCols(hstmt, &columnCount);

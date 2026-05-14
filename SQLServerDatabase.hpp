@@ -38,19 +38,23 @@ public:
   bool Connect() override;
   void Disconnect() override;
 
-  bool RunStatement(const std::string &query) override;
+  bool RunStatement(const std::string &query, const std::string& context = "") override;
   bool RunPrepared(const std::string &query,
-                   const std::vector<omnisphere::types::SQLParam> &params) override;
+                   const std::vector<omnisphere::types::SQLParam> &params,
+                   const std::string& context = "") override;
 
   omnisphere::types::DataTable
   FetchPrepared(const std::string &query,
-                const std::vector<omnisphere::types::SQLParam> &params) override;
+                const std::vector<omnisphere::types::SQLParam> &params,
+                const std::string& context = "") override;
   omnisphere::types::DataTable
   FetchPrepared(const std::string &query,
-                const std::vector<std::string> &params) override;
+                const std::vector<std::string> &params,
+                const std::string& context = "") override;
   omnisphere::types::DataTable FetchPrepared(const std::string &query,
-                                             const std::string &param) override;
-  omnisphere::types::DataTable FetchResults(const std::string &query) override;
+                                             const std::string &param,
+                                             const std::string& context = "") override;
+  omnisphere::types::DataTable FetchResults(const std::string &query, const std::string& context = "") override;
 
   bool BeginTransaction() override;
   bool CommitTransaction() override;
