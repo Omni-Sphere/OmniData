@@ -46,7 +46,7 @@ namespace omnisphere::services
         do
         {
             ret = SQLGetDiagRec(type, handle, ++i, state, &native, text, sizeof(text),
-                                    &len);
+                                &len);
 
             if (SQL_SUCCEEDED(ret))
             {
@@ -66,9 +66,10 @@ namespace omnisphere::services
     }
 
     MySQLDatabase::MySQLDatabase()
-    : henv(SQL_NULL_HENV), hdbc(SQL_NULL_HDBC), hstmt(SQL_NULL_HSTMT) {}
+        : henv(SQL_NULL_HENV), hdbc(SQL_NULL_HDBC), hstmt(SQL_NULL_HSTMT) {}
 
     MySQLDatabase::~MySQLDatabase()
+
     { Disconnect(); }
 
     void MySQLDatabase::ConnectionString(const std::string &connectionString)
@@ -108,7 +109,7 @@ namespace omnisphere::services
                     ExtractError("SQLAllocHandle DBC", henv, SQL_HANDLE_ENV));
 
             ret = SQLDriverConnect(hdbc, nullptr, (SQLCHAR *)connString.c_str(),
-                                       SQL_NTS, nullptr, 0, nullptr, SQL_DRIVER_NOPROMPT);
+                                   SQL_NTS, nullptr, 0, nullptr, SQL_DRIVER_NOPROMPT);
 
             if (!SQL_SUCCEEDED(ret))
                 throw std::runtime_error(
@@ -172,7 +173,7 @@ namespace omnisphere::services
         catch (const std::exception &ex)
         {
             throw std::runtime_error(std::string("[MySQLDatabase::PrepareStatement] ") +
-                                         ex.what());
+                                     ex.what());
         }
     }
 
@@ -208,7 +209,7 @@ namespace omnisphere::services
         catch (const std::exception &e)
         {
             throw std::runtime_error(std::string("[MySQLDatabase::RunStatement] ") +
-                                         e.what());
+                                     e.what());
         }
     }
 
@@ -217,7 +218,7 @@ namespace omnisphere::services
         try
         {
             SQLRETURN ret = SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT,
-                                                  (SQLPOINTER)SQL_AUTOCOMMIT_OFF, 0);
+                                              (SQLPOINTER)SQL_AUTOCOMMIT_OFF, 0);
 
             if (!SQL_SUCCEEDED(ret))
                 throw std::runtime_error(
@@ -228,7 +229,7 @@ namespace omnisphere::services
         catch (const std::exception &e)
         {
             throw std::runtime_error(std::string("[MySQLDatabase::BeginTransaction] ") +
-                                         e.what());
+                                     e.what());
         }
     }
 
@@ -243,7 +244,7 @@ namespace omnisphere::services
                     ExtractError("Commit Error", hdbc, SQL_HANDLE_DBC));
 
             ret = SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT,
-                                        (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
+                                    (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
 
             if (!SQL_SUCCEEDED(ret))
                 throw std::runtime_error(
@@ -268,7 +269,7 @@ namespace omnisphere::services
                     ExtractError("MySQLDatabase::Rollback", hdbc, SQL_HANDLE_DBC));
 
             ret = SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT,
-                                        (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
+                                    (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
 
             if (!SQL_SUCCEEDED(ret))
                 throw std::runtime_error(
@@ -342,8 +343,8 @@ namespace omnisphere::services
                     indStorage[paramIndex - 1] = SQL_NULL_DATA;
 
                     return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                                    SQL_VARCHAR, 0, 0, &dummy, 0,
-                                                    &indStorage[paramIndex - 1]);
+                                            SQL_VARCHAR, 0, 0, &dummy, 0,
+                                            &indStorage[paramIndex - 1]);
                 }
 
                 SQLRETURN operator()(const int &value) const
@@ -352,8 +353,8 @@ namespace omnisphere::services
                     indStorage[paramIndex - 1] = sizeof(int);
 
                     return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_SLONG,
-                                                    SQL_INTEGER, 0, 0, &intStorage.back(), 0,
-                                                    &indStorage[paramIndex - 1]);
+                                            SQL_INTEGER, 0, 0, &intStorage.back(), 0,
+                                            &indStorage[paramIndex - 1]);
                 }
 
                 SQLRETURN operator()(const double &value) const
@@ -373,9 +374,9 @@ namespace omnisphere::services
                     indStorage[paramIndex - 1] = static_cast<SQLLEN>(storedStr.size());
 
                     return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                                    SQL_VARCHAR, indStorage[paramIndex - 1], 0,
-                                                    (SQLPOINTER)storedStr.c_str(), 0,
-                                                    &indStorage[paramIndex - 1]);
+                                            SQL_VARCHAR, indStorage[paramIndex - 1], 0,
+                                            (SQLPOINTER)storedStr.c_str(), 0,
+                                            &indStorage[paramIndex - 1]);
                 }
 
                 SQLRETURN operator()(const std::vector<uint8_t> &value) const
@@ -398,15 +399,16 @@ namespace omnisphere::services
                     indStorage[paramIndex - 1] = static_cast<SQLLEN>(storedStr.size());
 
                     return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                                    SQL_VARCHAR, indStorage[paramIndex - 1], 0,
-                                                    (SQLPOINTER)storedStr.c_str(), 0,
-                                                    &indStorage[paramIndex - 1]);
+                                            SQL_VARCHAR, indStorage[paramIndex - 1], 0,
+                                            (SQLPOINTER)storedStr.c_str(), 0,
+                                            &indStorage[paramIndex - 1]);
                 }
             };
 
             for (const omnisphere::types::SQLParam &param : params)
             {
                 ParamVisitor visitor
+
                 {hstmt,        paramIndex,    indStorage,
                     intStorage,   doubleStorage, stringStorage,
                     binaryStorage};
@@ -415,7 +417,7 @@ namespace omnisphere::services
                 if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
                 {
                     throw std::runtime_error("Error binding parameter " +
-                                                     std::to_string(paramIndex));
+                                             std::to_string(paramIndex));
                 }
 
                 paramIndex++;
@@ -441,7 +443,7 @@ namespace omnisphere::services
             }
             omnisphere::utils::Logger::LogTrace("MySQLDatabase", std::string("RunPrepared Exception: ") + ex.what());
             throw std::runtime_error(std::string("[MySQLDatabase::RunPrepared Exception] ") +
-                                         ex.what());
+                                     ex.what());
         }
     }
 
@@ -483,8 +485,8 @@ namespace omnisphere::services
             for (SQLUSMALLINT i = 1; i <= columnCount; ++i)
             {
                 SQLDescribeCol(hstmt, i, columnName, sizeof(columnName),
-                                     &columnNameLength, &nativeTypes[i - 1], &columnSize,
-                                     &decimalDigits, &nullable);
+                               &columnNameLength, &nativeTypes[i - 1], &columnSize,
+                               &decimalDigits, &nullable);
 
                 columnNames[i - 1] =
                 std::string(reinterpret_cast<char *>(columnName), columnNameLength);
@@ -508,7 +510,7 @@ namespace omnisphere::services
                         {
                             std::vector<uint8_t> buffer(512);
                             SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_BINARY, buffer.data(),
-                                                                   (SQLLEN)buffer.size(), &indicator);
+                                                       (SQLLEN)buffer.size(), &indicator);
 
                             if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
                             {
@@ -519,9 +521,9 @@ namespace omnisphere::services
                                 else
                                 {
                                     size_t size = (indicator > 0 &&
-                                                                   indicator < static_cast<SQLLEN>(buffer.size()))
+                                                   indicator < static_cast<SQLLEN>(buffer.size()))
                                     ? static_cast<size_t>(indicator)
-                                    : buffer.size();
+                                        : buffer.size();
                                     buffer.resize(size);
                                     row.Set(colName, buffer);
                                 }
@@ -589,7 +591,7 @@ namespace omnisphere::services
                         {
                             char buffer[1024] = {0};
                             SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_CHAR, buffer,
-                                                                   sizeof(buffer), &indicator);
+                                                       sizeof(buffer), &indicator);
 
                             if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
                             {
@@ -624,7 +626,7 @@ namespace omnisphere::services
         catch (const std::exception &ex)
         {
             throw std::runtime_error(std::string("[MySQLDatabase::FetchResults] Excepción: ") +
-                                         ex.what());
+                                     ex.what());
         }
     }
 
@@ -647,7 +649,7 @@ namespace omnisphere::services
 
                 if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
                     throw std::runtime_error("Error binding parameter " +
-                                                     std::to_string(i + 1));
+                                             std::to_string(i + 1));
             }
 
             LogSQL(context, query, params);
@@ -670,8 +672,8 @@ namespace omnisphere::services
             for (SQLUSMALLINT i = 1; i <= columnCount; ++i)
             {
                 SQLDescribeCol(hstmt, i, columnName, sizeof(columnName),
-                                     &columnNameLength, &nativeTypes[i - 1], &columnSize,
-                                     &decimalDigits, &nullable);
+                               &columnNameLength, &nativeTypes[i - 1], &columnSize,
+                               &decimalDigits, &nullable);
                 columnNames[i - 1] =
                 std::string(reinterpret_cast<char *>(columnName), columnNameLength);
             }
@@ -692,7 +694,7 @@ namespace omnisphere::services
                     {
                         std::vector<uint8_t> buffer(512);
                         SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_BINARY, buffer.data(),
-                                                             (SQLLEN)buffer.size(), &indicator);
+                                                   (SQLLEN)buffer.size(), &indicator);
 
                         if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
                         {
@@ -703,9 +705,9 @@ namespace omnisphere::services
                             else
                             {
                                 size_t size = (indicator > 0 &&
-                                                             indicator < static_cast<SQLLEN>(buffer.size()))
+                                               indicator < static_cast<SQLLEN>(buffer.size()))
                                 ? static_cast<size_t>(indicator)
-                                : buffer.size();
+                                    : buffer.size();
                                 buffer.resize(size);
                                 row.Set(colName, buffer);
                             }
@@ -766,7 +768,7 @@ namespace omnisphere::services
                     {
                         char buffer[512] = {0};
                         SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_CHAR, buffer,
-                                                             sizeof(buffer), &indicator);
+                                                   sizeof(buffer), &indicator);
 
                         if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
                         {
@@ -799,7 +801,7 @@ namespace omnisphere::services
         catch (const std::exception &ex)
         {
             throw std::runtime_error(std::string("[MySQLDatabase::FetchPrepared] Excepción: ") +
-                                         ex.what());
+                                     ex.what());
         }
     }
 
@@ -808,6 +810,7 @@ namespace omnisphere::services
                                                               const std::string& context)
     {
         return FetchPrepared(query, std::vector<std::string>
+
         {param}, context);
     }
 
@@ -862,8 +865,8 @@ namespace omnisphere::services
                     indStorage[paramIndex - 1] = SQL_NULL_DATA;
 
                     return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                                    SQL_VARCHAR, 0, 0, &dummy, 0,
-                                                    &indStorage[paramIndex - 1]);
+                                            SQL_VARCHAR, 0, 0, &dummy, 0,
+                                            &indStorage[paramIndex - 1]);
                 }
 
                 SQLRETURN operator()(const int &value) const
@@ -872,8 +875,8 @@ namespace omnisphere::services
                     indStorage[paramIndex - 1] = sizeof(int);
 
                     return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_SLONG,
-                                                    SQL_INTEGER, 0, 0, &intStorage.back(), 0,
-                                                    &indStorage[paramIndex - 1]);
+                                            SQL_INTEGER, 0, 0, &intStorage.back(), 0,
+                                            &indStorage[paramIndex - 1]);
                 }
 
                 SQLRETURN operator()(const double &value) const
@@ -893,9 +896,9 @@ namespace omnisphere::services
                     indStorage[paramIndex - 1] = static_cast<SQLLEN>(storedStr.size());
 
                     return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                                    SQL_VARCHAR, indStorage[paramIndex - 1], 0,
-                                                    (SQLPOINTER)storedStr.c_str(), 0,
-                                                    &indStorage[paramIndex - 1]);
+                                            SQL_VARCHAR, indStorage[paramIndex - 1], 0,
+                                            (SQLPOINTER)storedStr.c_str(), 0,
+                                            &indStorage[paramIndex - 1]);
                 }
 
                 SQLRETURN operator()(const std::vector<uint8_t> &value) const
@@ -918,15 +921,16 @@ namespace omnisphere::services
                     indStorage[paramIndex - 1] = static_cast<SQLLEN>(storedStr.size());
 
                     return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                                    SQL_VARCHAR, indStorage[paramIndex - 1], 0,
-                                                    (SQLPOINTER)storedStr.c_str(), 0,
-                                                    &indStorage[paramIndex - 1]);
+                                            SQL_VARCHAR, indStorage[paramIndex - 1], 0,
+                                            (SQLPOINTER)storedStr.c_str(), 0,
+                                            &indStorage[paramIndex - 1]);
                 }
             };
 
             for (const omnisphere::types::SQLParam &param : params)
             {
                 ParamVisitor visitor
+
                 {hstmt,        paramIndex,    indStorage,
                     intStorage,   doubleStorage, stringStorage,
                     binaryStorage};
@@ -959,8 +963,8 @@ namespace omnisphere::services
             for (SQLUSMALLINT i = 1; i <= columnCount; ++i)
             {
                 SQLDescribeCol(hstmt, i, columnName, sizeof(columnName),
-                                     &columnNameLength, &nativeTypes[i - 1], &columnSize,
-                                     &decimalDigits, &nullable);
+                               &columnNameLength, &nativeTypes[i - 1], &columnSize,
+                               &decimalDigits, &nullable);
                 columnNames[i - 1] =
                 std::string(reinterpret_cast<char *>(columnName), columnNameLength);
             }
@@ -980,7 +984,7 @@ namespace omnisphere::services
                     {
                         std::vector<uint8_t> buffer(512);
                         SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_BINARY, buffer.data(),
-                                                             (SQLLEN)buffer.size(), &indicator);
+                                                   (SQLLEN)buffer.size(), &indicator);
 
                         if (SQL_SUCCEEDED(ret))
                         {
@@ -1011,7 +1015,7 @@ namespace omnisphere::services
                     {
                         char buffer[512];
                         SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_CHAR, buffer,
-                                                             sizeof(buffer), &indicator);
+                                                   sizeof(buffer), &indicator);
 
                         if (SQL_SUCCEEDED(ret))
                         {
@@ -1042,7 +1046,7 @@ namespace omnisphere::services
             }
 
             throw std::runtime_error(std::string("[MySQLDatabase::FetchPrepared Exception] ") +
-                                         ex.what());
+                                     ex.what());
         }
     }
 

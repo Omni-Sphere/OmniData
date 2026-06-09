@@ -9,6 +9,7 @@ namespace omnisphere::types
     }
 
     void DataTable::AddRow(const Row &row)
+
     { data.push_back(row); }
 
     void DataTable::Fill(const std::vector<Row> &newData)
@@ -17,6 +18,7 @@ namespace omnisphere::types
     }
 
     void DataTable::Clear()
+
     { data.clear(); }
 
     DataTable::Row &DataTable::operator[](int index)
@@ -56,7 +58,7 @@ namespace omnisphere::types
         if (it == values.end())
         {
             throw std::runtime_error("DataTable: Column '" + column +
-                                         "' not found in row");
+                                     "' not found in row");
         }
 
         return ValueProxy(&it->second);
@@ -71,7 +73,7 @@ namespace omnisphere::types
         if (it == values.end())
         {
             throw std::runtime_error("DataTable: Column '" + column +
-                                         "' not found in row");
+                                     "' not found in row");
         }
 
         return it->second;
