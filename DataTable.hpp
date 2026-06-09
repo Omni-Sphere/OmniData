@@ -30,8 +30,12 @@ namespace omnisphere::types
             class ValueProxy
             {
                 public:
-                explicit ValueProxy(Value *valuePtr)
-                    : valuePtr_(valuePtr) {}
+                explicit ValueProxy(
+                    Value *valuePtr
+                )
+                    : valuePtr_(
+                        valuePtr
+                    ) {}
 
                 static std::string Demangle(const char *name)
                 {
