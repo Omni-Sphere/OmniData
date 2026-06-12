@@ -641,7 +641,7 @@ namespace omnisphere::services
         }
         catch (const std::exception &ex)
         {
-            throw std::runtime_error(std::string("[SQLServerDatabase::FetchResults] Excepción: ") +
+            throw std::runtime_error(std::string("[SQLServerDatabase::FetchResults] Exception: ") +
                                      ex.what());
         }
     }
@@ -819,7 +819,7 @@ namespace omnisphere::services
         }
         catch (const std::exception &ex)
         {
-            throw std::runtime_error(std::string("[SQLServerDatabase::FetchPrepared] Excepción: ") +
+            throw std::runtime_error(std::string("[SQLServerDatabase::FetchPrepared] Exception: ") +
                                      ex.what());
         }
     }

@@ -625,7 +625,7 @@ namespace omnisphere::services
         }
         catch (const std::exception &ex)
         {
-            throw std::runtime_error(std::string("[MySQLDatabase::FetchResults] Excepción: ") +
+            throw std::runtime_error(std::string("[MySQLDatabase::FetchResults] Exception: ") +
                                      ex.what());
         }
     }
@@ -800,7 +800,7 @@ namespace omnisphere::services
         }
         catch (const std::exception &ex)
         {
-            throw std::runtime_error(std::string("[MySQLDatabase::FetchPrepared] Excepción: ") +
+            throw std::runtime_error(std::string("[MySQLDatabase::FetchPrepared] Exception: ") +
                                      ex.what());
         }
     }
