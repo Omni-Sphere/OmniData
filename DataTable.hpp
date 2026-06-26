@@ -81,6 +81,40 @@ namespace omnisphere::types
                         return *val;
 
                     const Row::Data &v = valuePtr_->value();
+
+                    if constexpr (std::is_same_v<T, double>)
+                    {
+                        if (const int *ival = std::get_if<int>(&v))
+                            return static_cast<double>(*ival);
+                        if (const std::string *sval = std::get_if<std::string>(&v))
+                        {
+                            try
+                            {
+                                return std::stod(*sval);
+                            }
+                            catch (...)
+                            {
+                                return std::nullopt;
+                            }
+                        }
+                    }
+                    else if constexpr (std::is_same_v<T, int>)
+                    {
+                        if (const double *dval = std::get_if<double>(&v))
+                            return static_cast<int>(*dval);
+                        if (const std::string *sval = std::get_if<std::string>(&v))
+                        {
+                            try
+                            {
+                                return std::stoi(*sval);
+                            }
+                            catch (...)
+                            {
+                                return std::nullopt;
+                            }
+                        }
+                    }
+
                     throw std::runtime_error("DataTable: Cannot convert actual type '" +
                                              GetTypeName(v) +
                                              "' to requested optional type '" +
@@ -141,11 +175,33 @@ namespace omnisphere::types
                         {
                             if (const int *ival = std::get_if<int>(&v))
                                 return static_cast<double>(*ival);
+                            if (const std::string *sval = std::get_if<std::string>(&v))
+                            {
+                                try
+                                {
+                                    return std::stod(*sval);
+                                }
+                                catch (...)
+                                {
+                                    throw std::runtime_error("DataTable: Cannot convert string '" + *sval + "' to double");
+                                }
+                            }
                         }
                         else if constexpr (std::is_same_v<T, int>)
                         {
                             if (const double *dval = std::get_if<double>(&v))
                                 return static_cast<int>(*dval);
+                            if (const std::string *sval = std::get_if<std::string>(&v))
+                            {
+                                try
+                                {
+                                    return std::stoi(*sval);
+                                }
+                                catch (...)
+                                {
+                                    throw std::runtime_error("DataTable: Cannot convert string '" + *sval + "' to int");
+                                }
+                            }
                         }
 
                         throw std::runtime_error("DataTable: Cannot convert actual type '" +
