@@ -126,6 +126,12 @@ namespace omnisphere::types
                     return GetOptional<T>();
                 }
 
+                
+                template <typename T> T As() const
+                {
+                    return static_cast<T>(*this);
+                }
+
                 template <typename T> operator T() const
                 {
                     if (IsNull())
