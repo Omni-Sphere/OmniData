@@ -28,7 +28,8 @@ namespace omnisphere::types
 
     inline QueryParts BuildQueryParts(const std::vector<std::string>& fields, 
                                       const std::vector<Condition>& conditions = {},
-                                      const std::map<std::string, RelationMap>& relations = {})
+                                      const std::map<std::string, RelationMap>& relations = {},
+                                      const std::string& rootTableAlias = "")
     {        QueryParts parts;
         std::map<std::string, bool> alreadyJoined;
 
@@ -68,7 +69,11 @@ namespace omnisphere::types
 
                     parts.SelectClause += tableAlias + ".[" + colName + "] AS " + objName + "_" + fieldName;
                 } else {
-                    parts.SelectClause += "[" + fields[i] + "]";
+                    if (!rootTableAlias.empty()) {
+                        parts.SelectClause += rootTableAlias + ".[" + fields[i] + "]";
+                    } else {
+                        parts.SelectClause += "[" + fields[i] + "]";
+                    }
                 }
             }
         }
@@ -78,7 +83,11 @@ namespace omnisphere::types
             if (i > 0) parts.WhereClause += " AND ";
             
             if (conditions[i].Entity.empty()) {
-                parts.WhereClause += "[" + conditions[i].Field + "] " + conditions[i].Operator + " " + conditions[i].Value;
+                if (!rootTableAlias.empty()) {
+                    parts.WhereClause += rootTableAlias + ".[" + conditions[i].Field + "] " + conditions[i].Operator + " " + conditions[i].Value;
+                } else {
+                    parts.WhereClause += "[" + conditions[i].Field + "] " + conditions[i].Operator + " " + conditions[i].Value;
+                }
             } else {
                 std::string objName = conditions[i].Entity;
                 std::string tableAlias = objName;
@@ -110,7 +119,7 @@ namespace omnisphere::types
         return parts;
     }
 
-    inline std::string BuildSelectClause(const std::vector<std::string>& fields, const std::map<std::string, RelationMap>& relations = {})
+    inline std::string BuildSelectClause(const std::vector<std::string>& fields, const std::map<std::string, RelationMap>& relations = {}, const std::string& rootTableAlias = "")
     {
         if (fields.empty())
             return "*";
@@ -140,7 +149,11 @@ namespace omnisphere::types
                 clause += tableAlias + ".[" + colName + "] AS " + objName + "_" + fieldName;
             } else {
                 // If it's a root field, just use the field name. Caller should handle ambiguity.
-                clause += "[" + fields[i] + "]";
+                if (!rootTableAlias.empty()) {
+                    clause += rootTableAlias + ".[" + fields[i] + "]";
+                } else {
+                    clause += "[" + fields[i] + "]";
+                }
             }
         }
 
