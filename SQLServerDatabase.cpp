@@ -11,20 +11,20 @@ namespace omnisphere::services
     {
         std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
         std::string formattedQuery = omnisphere::types::FormatSQL(query, params);
-        omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "[SQLServer] " + ctxStr + formattedQuery);
+        omnisphere::utils::Logger::LogSQL("SQLServer", ctxStr + formattedQuery);
     }
 
     static void LogSQL(const std::string& context, const std::string& query, const std::vector<std::string>& params)
     {
         std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
         std::string formattedQuery = omnisphere::types::FormatSQL(query, params);
-        omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "[SQLServer] " + ctxStr + formattedQuery);
+        omnisphere::utils::Logger::LogSQL("SQLServer", ctxStr + formattedQuery);
     }
 
     static void LogSQL(const std::string& context, const std::string& query)
     {
         std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
-        omnisphere::utils::Logger::LogSystem(omnisphere::utils::LogType::INFO, "SQL", "[SQLServer] " + ctxStr + query);
+        omnisphere::utils::Logger::LogSQL("SQLServer", ctxStr + query);
     }
 
     std::string SQLServerDatabase::ExtractError(const char *fn, SQLHANDLE handle,
