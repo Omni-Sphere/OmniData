@@ -13,6 +13,9 @@ using SQLHDBC = void*;
 using SQLHSTMT = void*;
 using SQLHANDLE = void*;
 using SQLSMALLINT = short;
+using SQLLEN = int64_t;
+using SQLRETURN = short;
+using SQLCHAR = char;
 #else
 #include <sql.h>
 #include <sqlext.h>
