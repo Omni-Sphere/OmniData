@@ -26,24 +26,26 @@ target_include_directories(OmniData
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-if(WIN32)
-    target_link_libraries(OmniData PUBLIC odbc32)
+if(ANDROID)
+    target_link_libraries(OmniData PUBLIC
+        OmniUtils
+        Boost::json
+    )
+elseif(WIN32)
+    find_library(SODIUM_LIB sodium REQUIRED)
+    find_package(Boost REQUIRED COMPONENTS json)
+    target_link_libraries(OmniData PUBLIC odbc32 ${SODIUM_LIB} Boost::json OmniUtils)
 elseif(APPLE)
     find_library(ODBC_LIB odbc REQUIRED)
-    target_link_libraries(OmniData PUBLIC ${ODBC_LIB})
+    find_library(SODIUM_LIB sodium REQUIRED)
+    find_package(Boost REQUIRED COMPONENTS json)
+    target_link_libraries(OmniData PUBLIC ${ODBC_LIB} ${SODIUM_LIB} Boost::json OmniUtils)
 else()
     find_package(ODBC REQUIRED)
-    target_link_libraries(OmniData PUBLIC ODBC::ODBC)
+    find_library(SODIUM_LIB sodium REQUIRED)
+    find_package(Boost REQUIRED COMPONENTS json)
+    target_link_libraries(OmniData PUBLIC ODBC::ODBC ${SODIUM_LIB} Boost::json OmniUtils)
 endif()
-
-find_library(SODIUM_LIB sodium REQUIRED)
-find_package(Boost REQUIRED COMPONENTS json)
-
-target_link_libraries(OmniData PUBLIC
-    ${SODIUM_LIB}
-    Boost::json
-    OmniUtils
-)
 
 set_target_properties(OmniData PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${LIBS_DIR}"
