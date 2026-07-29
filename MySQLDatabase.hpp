@@ -7,8 +7,16 @@
 #endif
 #include <windows.h>
 #endif
+#if defined(ANDROID) || defined(__ANDROID__)
+using SQLHENV = void*;
+using SQLHDBC = void*;
+using SQLHSTMT = void*;
+using SQLHANDLE = void*;
+using SQLSMALLINT = short;
+#else
 #include <sql.h>
 #include <sqlext.h>
+#endif
 
 namespace omnisphere::services
 {
