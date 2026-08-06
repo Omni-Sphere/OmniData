@@ -5,7 +5,7 @@
 #include <variant>
 #include <SQLParams.hpp>
 
-namespace omnisphere::services
+namespace omnisphere::data
 {
     static void LogSQL(const std::string& context, const std::string& query, const std::vector<omnisphere::types::SQLParam>& params)
     {
@@ -1072,4 +1072,4 @@ namespace omnisphere::services
         }
     }
 
-} // namespace omnisphere::services
+} // namespace omnisphere::data

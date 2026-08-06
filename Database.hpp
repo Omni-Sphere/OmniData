@@ -4,12 +4,13 @@
 #include <memory>
 #include <string>
 
-namespace omnisphere::services
+namespace omnisphere::data
 {
     enum class DatabaseEngine
     {
         SQLServer,
-        MySQL
+        MySQL,
+        PostgreSQL
     };
 
     class Database : public IDatabase
@@ -82,4 +83,4 @@ namespace omnisphere::services
         { return _impl->RollbackTransaction(); }
     };
 
-} // namespace omnisphere::services
+} // namespace omnisphere::data

@@ -111,12 +111,12 @@ namespace omnisphere::types
                         }
                     }
 
-                    parts.SelectClause += tableAlias + ".[" + colName + "] AS " + objName + "_" + fieldName;
+                    parts.SelectClause += tableAlias + "." + colName + " AS " + objName + "_" + fieldName;
                 } else {
                     if (!rootTableAlias.empty()) {
-                        parts.SelectClause += rootTableAlias + ".[" + fields[i] + "]";
+                        parts.SelectClause += rootTableAlias + "." + fields[i];
                     } else {
-                        parts.SelectClause += "[" + fields[i] + "]";
+                        parts.SelectClause += fields[i];
                     }
                 }
             }
@@ -128,9 +128,9 @@ namespace omnisphere::types
             
             if (conditions[i].Entity.empty()) {
                 if (!rootTableAlias.empty()) {
-                    parts.WhereClause += rootTableAlias + ".[" + conditions[i].Field + "] " + conditions[i].Operator + " " + conditions[i].Value;
+                    parts.WhereClause += rootTableAlias + "." + conditions[i].Field + " " + conditions[i].Operator + " " + conditions[i].Value;
                 } else {
-                    parts.WhereClause += "[" + conditions[i].Field + "] " + conditions[i].Operator + " " + conditions[i].Value;
+                    parts.WhereClause += conditions[i].Field + " " + conditions[i].Operator + " " + conditions[i].Value;
                 }
             } else {
                 std::string objName = conditions[i].Entity;
@@ -156,7 +156,7 @@ namespace omnisphere::types
                     }
                 }
                 
-                parts.WhereClause += tableAlias + ".[" + colName + "] " + conditions[i].Operator + " " + conditions[i].Value;
+                parts.WhereClause += tableAlias + "." + colName + " " + conditions[i].Operator + " " + conditions[i].Value;
             }
         }
 
@@ -190,13 +190,13 @@ namespace omnisphere::types
                     }
                 }
                 
-                clause += tableAlias + ".[" + colName + "] AS " + objName + "_" + fieldName;
+                clause += tableAlias + "." + colName + " AS " + objName + "_" + fieldName;
             } else {
                 // If it's a root field, just use the field name. Caller should handle ambiguity.
                 if (!rootTableAlias.empty()) {
-                    clause += rootTableAlias + ".[" + fields[i] + "]";
+                    clause += rootTableAlias + "." + fields[i];
                 } else {
-                    clause += "[" + fields[i] + "]";
+                    clause += fields[i];
                 }
             }
         }
@@ -221,7 +221,7 @@ namespace omnisphere::types
                 sql += ", ";
                 placeholders += ", ";
             }
-            sql += "[" + columns[i] + "]";
+            sql += columns[i];
             placeholders += "?";
         }
 
@@ -274,7 +274,7 @@ namespace omnisphere::types
         for (size_t i = 0; i < setColumns.size(); ++i)
         {
             if (i > 0) sql += ", ";
-            sql += "[" + setColumns[i] + "] = ?";
+            sql += setColumns[i] + " = ?";
         }
 
         if (!whereClause.empty())

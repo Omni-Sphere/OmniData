@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace omnisphere::services
+namespace omnisphere::data
 {
     class IDatabase
     {
@@ -45,4 +45,4 @@ namespace omnisphere::services
         virtual bool RollbackTransaction() = 0;
     };
 
-} // namespace omnisphere::services
+} // namespace omnisphere::data

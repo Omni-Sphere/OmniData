@@ -19,6 +19,7 @@ add_library(OmniData SHARED
     Database.cpp
     SQLServerDatabase.cpp
     MySQLDatabase.cpp
+    PostgreSQLDatabase.cpp
 )
 
 target_include_directories(OmniData
@@ -82,6 +83,7 @@ set(PUBLIC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/IDatabase.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/SQLServerDatabase.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MySQLDatabase.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/PostgreSQLDatabase.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/DataTable.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/SQLParams.hpp
 )

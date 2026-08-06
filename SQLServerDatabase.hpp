@@ -21,7 +21,7 @@ using SQLCHAR = char;
 #include <sqlext.h>
 #endif
 
-namespace omnisphere::services
+namespace omnisphere::data
 {
     class SQLServerDatabase : public IDatabase
     {
@@ -74,4 +74,4 @@ namespace omnisphere::services
         bool RollbackTransaction() override;
     };
 
-} // namespace omnisphere::services
+} // namespace omnisphere::data

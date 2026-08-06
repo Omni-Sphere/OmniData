@@ -23,7 +23,7 @@ using SQLCHAR = char;
 
 namespace omnisphere::data
 {
-    class MySQLDatabase : public IDatabase
+    class PostgreSQLDatabase : public IDatabase
     {
         private:
         SQLHENV henv;
@@ -34,6 +34,7 @@ namespace omnisphere::data
 
         void PrepareStatement(const std::string &);
         std::string ExtractError(const char *, SQLHANDLE, SQLSMALLINT);
+
         std::vector<double> doubleStorage;
         std::vector<std::string> stringStorage;
         std::vector<std::vector<uint8_t>> binaryStorage;
@@ -41,8 +42,8 @@ namespace omnisphere::data
         std::vector<SQLLEN> indStorage;
 
         public:
-        MySQLDatabase();
-        ~MySQLDatabase() override;
+        PostgreSQLDatabase();
+        ~PostgreSQLDatabase() override;
 
         void ConnectionString(const std::string &connectionString) override;
 
