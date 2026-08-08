@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(OmniData LANGUAGES CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
@@ -22,30 +24,37 @@ add_library(OmniData SHARED
     PostgreSQLDatabase.cpp
 )
 
+add_library(OmniData::OmniData ALIAS OmniData)
+
 target_include_directories(OmniData
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+
+if(NOT TARGET OmniUtils::OmniUtils)
+    find_package(OmniUtils REQUIRED)
+endif()
 
 if(ANDROID)
     target_link_libraries(OmniData PUBLIC
-        OmniUtils
+        OmniUtils::OmniUtils
         Boost::json
     )
 elseif(WIN32)
     find_library(SODIUM_LIB sodium REQUIRED)
     find_package(Boost REQUIRED COMPONENTS json)
-    target_link_libraries(OmniData PUBLIC odbc32 ${SODIUM_LIB} Boost::json OmniUtils)
+    target_link_libraries(OmniData PUBLIC odbc32 ${SODIUM_LIB} Boost::json OmniUtils::OmniUtils)
 elseif(APPLE)
     find_library(ODBC_LIB odbc REQUIRED)
     find_library(SODIUM_LIB sodium REQUIRED)
     find_package(Boost REQUIRED COMPONENTS json)
-    target_link_libraries(OmniData PUBLIC ${ODBC_LIB} ${SODIUM_LIB} Boost::json OmniUtils)
+    target_link_libraries(OmniData PUBLIC ${ODBC_LIB} ${SODIUM_LIB} Boost::json OmniUtils::OmniUtils)
 else()
     find_package(ODBC REQUIRED)
     find_library(SODIUM_LIB sodium REQUIRED)
     find_package(Boost REQUIRED COMPONENTS json)
-    target_link_libraries(OmniData PUBLIC ODBC::ODBC ${SODIUM_LIB} Boost::json OmniUtils)
+    target_link_libraries(OmniData PUBLIC ODBC::ODBC ${SODIUM_LIB} Boost::json OmniUtils::OmniUtils)
 endif()
 
 set_target_properties(OmniData PROPERTIES
@@ -101,3 +110,42 @@ foreach(HDR ${PUBLIC_HEADERS})
         COMMENT "Copiando header: ${REL_PATH}"
     )
 endforeach()
+
+# --- Installation & Export ---
+include(GNUInstallDirs)
+
+install(TARGETS OmniData
+    EXPORT OmniDataTargets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
+    PATTERN "build" EXCLUDE
+    PATTERN ".git" EXCLUDE
+    PATTERN ".vscode" EXCLUDE
+)
+
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/OmniDataConfig.cmake"
+"include(CMakeFindDependencyMacro)\n"
+"find_dependency(Boost REQUIRED COMPONENTS json)\n"
+"if(NOT WIN32 AND NOT ANDROID)\n"
+"  find_dependency(ODBC REQUIRED)\n"
+"endif()\n"
+"find_dependency(OmniUtils REQUIRED)\n"
+"include(\"\${CMAKE_CURRENT_LIST_DIR}/OmniDataTargets.cmake\")\n"
+)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/OmniDataConfig.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OmniData
+)
+
+install(EXPORT OmniDataTargets
+    FILE OmniDataTargets.cmake
+    NAMESPACE OmniData::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OmniData
+)
