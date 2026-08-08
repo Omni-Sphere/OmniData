@@ -1,17 +1,34 @@
 cmake_minimum_required(VERSION 3.16)
 project(OmniData LANGUAGES CXX)
 
+# --- 0. Detección de la Raíz de Proyectos (Sin usar "../") ---
+get_filename_component(PROYECTOS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
+
+# --- Configuración inteligente para compilación manual ---
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        set(CMAKE_INSTALL_PREFIX "/usr/lib/OmniSphere" CACHE PATH "Directorio de instalación" FORCE)
+    else()
+        set(CMAKE_INSTALL_PREFIX "${PROYECTOS_ROOT}/.omni-dev-sdk" CACHE PATH "Directorio de instalación" FORCE)
+    endif()
+endif()
+
+# Forzar la subcarpeta para aislar los headers (ej. include/OmniData)
+set(CMAKE_INSTALL_INCLUDEDIR "include/${PROJECT_NAME}" CACHE PATH "Directorio de cabeceras" FORCE)
+
 include(GNUInstallDirs)
 
+# --- 1. Resolución de Rutas de las OmniLibs ---
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    if(EXISTS "/usr/lib/OmniSphere")
-        list(APPEND CMAKE_PREFIX_PATH "/usr/lib/OmniSphere")
-    endif()
+    set(OMNI_BASE_DIR "/usr/lib/OmniSphere")
 else()
-    get_filename_component(OMNI_PARENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
-    if(EXISTS "${OMNI_PARENT_DIR}/.omni-dev-sdk")
-        list(APPEND CMAKE_PREFIX_PATH "${OMNI_PARENT_DIR}/.omni-dev-sdk")
-    endif()
+    set(OMNI_BASE_DIR "${PROYECTOS_ROOT}/.omni-dev-sdk")
+endif()
+
+if(EXISTS "${OMNI_BASE_DIR}")
+    list(APPEND CMAKE_PREFIX_PATH "${OMNI_BASE_DIR}")
+    # Aseguramos que encuentre los Config.cmake de OmniUtils en su nueva ruta
+    list(APPEND CMAKE_PREFIX_PATH "${OMNI_BASE_DIR}/lib/OmniUtils/cmake/OmniUtils")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -43,8 +60,19 @@ target_include_directories(OmniData
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+# --- Resolución de dependencia OmniUtils ---
 if(NOT TARGET OmniUtils::OmniUtils)
     find_package(OmniUtils REQUIRED)
+endif()
+
+# --- Corrección limpia de rutas para OmniUtils importado ---
+if(TARGET OmniUtils::OmniUtils)
+    get_target_property(IS_IMPORTED OmniUtils::OmniUtils IMPORTED)
+    if(IS_IMPORTED)
+        set_target_properties(OmniUtils::OmniUtils PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${OMNI_BASE_DIR}/include"
+        )
+    endif()
 endif()
 
 if(ANDROID)
@@ -75,10 +103,12 @@ set_target_properties(OmniData PROPERTIES
 )
 
 if(WIN32)
+    # Eliminamos el uso de "../bin" extrayendo el directorio padre directamente
     get_filename_component(SODIUM_LIB_DIR "${SODIUM_LIB}" DIRECTORY)
+    get_filename_component(SODIUM_PARENT_DIR "${SODIUM_LIB_DIR}" DIRECTORY)
     find_file(SODIUM_DLL 
         NAMES "libsodium.dll" "sodium.dll" "libsodium-26.dll"
-        HINTS "${SODIUM_LIB_DIR}/../bin" "${SODIUM_LIB_DIR}"
+        HINTS "${SODIUM_PARENT_DIR}/bin" "${SODIUM_LIB_DIR}"
     )
     if(SODIUM_DLL)
         add_custom_command(TARGET OmniData POST_BUILD
@@ -88,7 +118,9 @@ if(WIN32)
 
     if(DEFINED Boost_LIBRARY_DIRS)
         list(GET Boost_LIBRARY_DIRS 0 FIRST_LIB_DIR)
-        set(BOOST_BIN_DIR "${FIRST_LIB_DIR}/../bin")
+        # Eliminamos el uso de "../bin" en Boost también
+        get_filename_component(BOOST_PARENT_DIR "${FIRST_LIB_DIR}" DIRECTORY)
+        set(BOOST_BIN_DIR "${BOOST_PARENT_DIR}/bin")
         file(GLOB BOOST_DLLS "${BOOST_BIN_DIR}/*boost_json*.dll")
         foreach(DLL ${BOOST_DLLS})
             add_custom_command(TARGET OmniData POST_BUILD
@@ -123,8 +155,6 @@ foreach(HDR ${PUBLIC_HEADERS})
 endforeach()
 
 # --- Installation & Export ---
-include(GNUInstallDirs)
-
 install(TARGETS OmniData
     EXPORT OmniDataTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

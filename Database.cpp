@@ -1,7 +1,7 @@
-#include <Database.hpp>
-#include <SQLServerDatabase.hpp>
-#include <MySQLDatabase.hpp>
-#include <PostgreSQLDatabase.hpp>
+#include "Database.hpp"
+#include "SQLServerDatabase.hpp"
+#include "MySQLDatabase.hpp"
+#include "PostgreSQLDatabase.hpp"
 
 namespace omnisphere::data
 {

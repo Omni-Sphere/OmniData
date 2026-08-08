@@ -1,9 +1,9 @@
-#include <MySQLDatabase.hpp>
+#include "MySQLDatabase.hpp"
 #include <stdexcept>
 #include <vector>
-#include <Logger.hpp>
+#include <OmniUtils/Logger.hpp>
 #include <variant>
-#include <SQLParams.hpp>
+#include "SQLParams.hpp"
 
 namespace omnisphere::data
 {

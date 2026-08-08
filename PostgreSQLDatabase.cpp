@@ -1,10 +1,10 @@
-#include <PostgreSQLDatabase.hpp>
+#include "PostgreSQLDatabase.hpp"
 #include <stdexcept>
 #include <vector>
 #include <map>
-#include <Logger.hpp>
+#include <OmniUtils/Logger.hpp>
 #include <variant>
-#include <SQLParams.hpp>
+#include "SQLParams.hpp"
 
 namespace omnisphere::data
 {
