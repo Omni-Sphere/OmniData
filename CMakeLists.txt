@@ -3,6 +3,17 @@ project(OmniData LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    if(EXISTS "/usr/lib/OmniSphere")
+        list(APPEND CMAKE_PREFIX_PATH "/usr/lib/OmniSphere")
+    endif()
+else()
+    get_filename_component(OMNI_PARENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+    if(EXISTS "${OMNI_PARENT_DIR}/.omni-dev-sdk")
+        list(APPEND CMAKE_PREFIX_PATH "${OMNI_PARENT_DIR}/.omni-dev-sdk")
+    endif()
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
