@@ -13,6 +13,17 @@ namespace omnisphere::data
         PostgreSQL
     };
 
+    struct ConnectionConfig
+    {
+        std::string server;
+        std::string database;
+        std::string user;
+        std::string password;
+        DatabaseEngine dbEngine;
+        bool trustCertificate = true;
+        bool trustedConnection = false;
+    };
+
     class Database : public IDatabase
     {
         private:
@@ -20,7 +31,21 @@ namespace omnisphere::data
 
         public:
         Database(DatabaseEngine engine = DatabaseEngine::SQLServer);
-        ~Database() override = default;
+        Database(const ConnectionConfig &connectionConfig);
+
+        ~Database() override;
+
+        static std::string BuildConnectionString(const ConnectionConfig& cfg);
+
+        static std::string BuildConnectionString(
+            DatabaseEngine engine,
+            const std::string& server,
+            const std::string& database,
+            const std::string& user,
+            const std::string& password,
+            bool trustCert = true,
+            bool trustedConn = false
+        );
 
         // Delegated IDatabase methods
         void ConnectionString(const std::string &connectionString) override
