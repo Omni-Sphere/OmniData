@@ -1,1053 +1,659 @@
 #include "MySQLDatabase.hpp"
-#include <stdexcept>
-#include <vector>
-#include <OmniUtils/Logger.hpp>
-#include <variant>
 #include "SQLParams.hpp"
+#include <OmniUtils/Logger.hpp>
+#include <cstring>
+#include <sstream>
+#include <stdexcept>
+#include <variant>
 
 namespace omnisphere::data
 {
-    static void LogSQL(const std::string& context, const std::string& query, const std::vector<omnisphere::types::SQLParam>& params)
+    // ─── MySQL library lifetime (one per process) ─────────────────────────────
+    namespace
     {
-        std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
-        std::string formattedQuery = omnisphere::types::FormatSQL(query, params);
-        omnisphere::utils::Logger::LogSQL("MySQL", ctxStr + formattedQuery);
-    }
-
-    static void LogSQL(const std::string& context, const std::string& query, const std::vector<std::string>& params)
-    {
-        std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
-        std::string formattedQuery = omnisphere::types::FormatSQL(query, params);
-        omnisphere::utils::Logger::LogSQL("MySQL", ctxStr + formattedQuery);
-    }
-
-    static void LogSQL(const std::string& context, const std::string& query)
-    {
-        std::string ctxStr = context.empty() ? "" : "[" + context + "] ";
-        omnisphere::utils::Logger::LogSQL("MySQL", ctxStr + query);
-    }
-
-    std::string MySQLDatabase::ExtractError(const char *fn, SQLHANDLE handle,
-                                            SQLSMALLINT type)
-    {
-        if (!handle)
+        struct MySQLLibrary
         {
-            return std::string(" [ExtractError] Null Handle or not initialized.");
+            MySQLLibrary()  { mysql_library_init(0, nullptr, nullptr); }
+            ~MySQLLibrary() { mysql_library_end(); }
+        };
+        static MySQLLibrary g_mysqlLibrary;
+    }
+
+    // ─── Logging helpers ──────────────────────────────────────────────────────
+    static void LogSQL(const std::string& ctx, const std::string& q,
+                       const std::vector<omnisphere::types::SQLParam>& p)
+    {
+        std::string prefix = ctx.empty() ? "" : "[" + ctx + "] ";
+        omnisphere::utils::Logger::LogSQL("MySQL",
+                                          prefix + omnisphere::types::FormatSQL(q, p));
+    }
+    static void LogSQL(const std::string& ctx, const std::string& q,
+                       const std::vector<std::string>& p)
+    {
+        std::string prefix = ctx.empty() ? "" : "[" + ctx + "] ";
+        omnisphere::utils::Logger::LogSQL("MySQL",
+                                          prefix + omnisphere::types::FormatSQL(q, p));
+    }
+    static void LogSQL(const std::string& ctx, const std::string& q)
+    {
+        std::string prefix = ctx.empty() ? "" : "[" + ctx + "] ";
+        omnisphere::utils::Logger::LogSQL("MySQL", prefix + q);
+    }
+
+    // ─── Internal helpers ─────────────────────────────────────────────────────
+
+    std::string MySQLDatabase::ExtractError() const
+    {
+        if (_conn) return mysql_error(_conn);
+        return "[MySQLDatabase] No active connection.";
+    }
+
+    std::string MySQLDatabase::ExtractStmtError(MYSQL_STMT* stmt) const
+    {
+        if (stmt) return mysql_stmt_error(stmt);
+        return "[MySQLDatabase] Null statement.";
+    }
+
+    /// Parse "host=h;port=p;dbname=d;user=u;password=pw;" format.
+    void MySQLDatabase::ParseConnectionString(const std::string& cs)
+    {
+        std::istringstream ss(cs);
+        std::string token;
+        while (std::getline(ss, token, ';'))
+        {
+            auto pos = token.find('=');
+            if (pos == std::string::npos) continue;
+            std::string key = token.substr(0, pos);
+            std::string val = token.substr(pos + 1);
+
+            if      (key == "host")     _host     = val;
+            else if (key == "port")     _port     = static_cast<unsigned int>(std::stoul(val));
+            else if (key == "dbname")   _database = val;
+            else if (key == "user")     _user     = val;
+            else if (key == "password") _password = val;
+        }
+    }
+
+    // ─── Build MYSQL_BIND[] for input parameters ──────────────────────────────
+    //
+    // Type mapping (C++ → MySQL native):
+    //   std::monostate          → MYSQL_TYPE_NULL
+    //   bool                    → MYSQL_TYPE_TINY  (native TINYINT/BOOLEAN, 0 or 1)
+    //   int                     → MYSQL_TYPE_LONG
+    //   double                  → MYSQL_TYPE_DOUBLE
+    //   std::string             → MYSQL_TYPE_STRING
+    //   std::vector<uint8_t>    → MYSQL_TYPE_BLOB
+    //
+    void MySQLDatabase::BuildParamBinds(
+        const std::vector<omnisphere::types::SQLParam>& params,
+        std::vector<ParamStorage>&                      storage,
+        std::vector<MYSQL_BIND>&                        binds)
+    {
+        const size_t n = params.size();
+        storage.resize(n);
+        binds.resize(n);
+
+        // Pre-size storage to prevent reallocation (pointers inside ParamStorage
+        // are written into MYSQL_BIND; reallocation would invalidate them)
+        // -> already done by resize(n) above.
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            std::memset(&binds[i], 0, sizeof(MYSQL_BIND));
+            ParamStorage& s = storage[i];
+
+            std::visit(
+                [&](auto&& arg)
+                {
+                    using T = std::decay_t<decltype(arg)>;
+
+                    if constexpr (std::is_same_v<T, std::monostate>)
+                    {
+                        s.isNull             = 1;
+                        binds[i].buffer_type = MYSQL_TYPE_NULL;
+                        binds[i].is_null     = &s.isNull;
+                    }
+                    else if constexpr (std::is_same_v<T, bool>)
+                    {
+                        // Native BOOLEAN — no Y/N conversion needed
+                        s.i8                 = arg ? 1 : 0;
+                        binds[i].buffer_type = MYSQL_TYPE_TINY;
+                        binds[i].buffer      = &s.i8;
+                        binds[i].buffer_length = sizeof(int8_t);
+                        binds[i].is_null     = &s.isNull;
+                    }
+                    else if constexpr (std::is_same_v<T, int>)
+                    {
+                        s.i32                = arg;
+                        binds[i].buffer_type = MYSQL_TYPE_LONG;
+                        binds[i].buffer      = &s.i32;
+                        binds[i].buffer_length = sizeof(int32_t);
+                        binds[i].is_null     = &s.isNull;
+                    }
+                    else if constexpr (std::is_same_v<T, double>)
+                    {
+                        s.f64                = arg;
+                        binds[i].buffer_type = MYSQL_TYPE_DOUBLE;
+                        binds[i].buffer      = &s.f64;
+                        binds[i].buffer_length = sizeof(double);
+                        binds[i].is_null     = &s.isNull;
+                    }
+                    else if constexpr (std::is_same_v<T, std::string>)
+                    {
+                        s.str                = arg;
+                        s.length             = static_cast<unsigned long>(s.str.size());
+                        binds[i].buffer_type = MYSQL_TYPE_STRING;
+                        binds[i].buffer      = const_cast<char*>(s.str.c_str());
+                        binds[i].buffer_length = s.str.size();
+                        binds[i].length      = &s.length;
+                        binds[i].is_null     = &s.isNull;
+                    }
+                    else if constexpr (std::is_same_v<T, std::vector<uint8_t>>)
+                    {
+                        s.blob               = arg;
+                        s.length             = static_cast<unsigned long>(s.blob.size());
+                        binds[i].buffer_type = MYSQL_TYPE_BLOB;
+                        binds[i].buffer      = s.blob.data();
+                        binds[i].buffer_length = s.blob.size();
+                        binds[i].length      = &s.length;
+                        binds[i].is_null     = &s.isNull;
+                    }
+                },
+                params[i]);
+        }
+    }
+
+    // ─── FetchFromStatement ────────────────────────────────────────────────────
+    //
+    // Converts MYSQL_STMT results into a DataTable.
+    //
+    // Result type mapping (MySQL → DataTable::Row::Data):
+    //   MYSQL_TYPE_TINY   (length==1)  → bool   (TINYINT(1) / BOOLEAN)
+    //   MYSQL_TYPE_TINY   (length>1)   → int
+    //   MYSQL_TYPE_SHORT/LONG/LONGLONG → int
+    //   MYSQL_TYPE_FLOAT/DOUBLE        → double
+    //   MYSQL_TYPE_DECIMAL/NEWDECIMAL  → double  (via string conversion)
+    //   MYSQL_TYPE_BLOB  + BINARY_FLAG → vector<uint8_t>
+    //   everything else               → string
+    //
+    omnisphere::types::DataTable MySQLDatabase::FetchFromStatement(MYSQL_STMT* stmt)
+    {
+        MYSQL_RES* meta = mysql_stmt_result_metadata(stmt);
+        if (!meta) return omnisphere::types::DataTable{};
+
+        int          numCols = mysql_num_fields(meta);
+        MYSQL_FIELD* fields  = mysql_fetch_fields(meta);
+
+        // Per-column storage: holds native-typed buffers that MYSQL_BIND points into.
+        // Pre-size to prevent reallocation (pointers must stay valid).
+        struct ColStorage
+        {
+            MYSQL_BIND    bind    = {};
+            std::vector<char> buffer;   // for variable-length types
+            unsigned long length = 0;
+            my_bool       isNull = 0;
+            my_bool       error  = 0;
+
+            // Fixed-size native storage
+            int8_t  i8  = 0;
+            int32_t i32 = 0;
+            int64_t i64 = 0;
+            float   f32 = 0.0f;
+            double  f64 = 0.0;
+        };
+
+        std::vector<ColStorage> cols(numCols);
+
+        for (int i = 0; i < numCols; ++i)
+        {
+            MYSQL_FIELD& f  = fields[i];
+            ColStorage&  cs = cols[i];
+
+            cs.bind.is_null = &cs.isNull;
+            cs.bind.error   = &cs.error;
+            cs.bind.length  = &cs.length;
+
+            switch (f.type)
+            {
+                case MYSQL_TYPE_TINY:
+                    cs.bind.buffer_type   = MYSQL_TYPE_TINY;
+                    cs.bind.buffer        = &cs.i8;
+                    cs.bind.buffer_length = sizeof(int8_t);
+                    break;
+
+                case MYSQL_TYPE_SHORT:
+                case MYSQL_TYPE_YEAR:
+                    cs.bind.buffer_type   = MYSQL_TYPE_LONG;
+                    cs.bind.buffer        = &cs.i32;
+                    cs.bind.buffer_length = sizeof(int32_t);
+                    break;
+
+                case MYSQL_TYPE_INT24:
+                case MYSQL_TYPE_LONG:
+                    cs.bind.buffer_type   = MYSQL_TYPE_LONG;
+                    cs.bind.buffer        = &cs.i32;
+                    cs.bind.buffer_length = sizeof(int32_t);
+                    break;
+
+                case MYSQL_TYPE_LONGLONG:
+                    cs.bind.buffer_type   = MYSQL_TYPE_LONGLONG;
+                    cs.bind.buffer        = &cs.i64;
+                    cs.bind.buffer_length = sizeof(int64_t);
+                    break;
+
+                case MYSQL_TYPE_FLOAT:
+                    cs.bind.buffer_type   = MYSQL_TYPE_FLOAT;
+                    cs.bind.buffer        = &cs.f32;
+                    cs.bind.buffer_length = sizeof(float);
+                    break;
+
+                case MYSQL_TYPE_DOUBLE:
+                    cs.bind.buffer_type   = MYSQL_TYPE_DOUBLE;
+                    cs.bind.buffer        = &cs.f64;
+                    cs.bind.buffer_length = sizeof(double);
+                    break;
+
+                case MYSQL_TYPE_DECIMAL:
+                case MYSQL_TYPE_NEWDECIMAL:
+                {
+                    // DECIMAL arrives as string; allocate enough for max precision
+                    unsigned long bufLen = (f.length > 0) ? f.length + 1 : 64;
+                    cs.buffer.resize(bufLen);
+                    cs.bind.buffer_type   = MYSQL_TYPE_STRING;
+                    cs.bind.buffer        = cs.buffer.data();
+                    cs.bind.buffer_length = cs.buffer.size();
+                    break;
+                }
+
+                default:
+                    // Strings, TEXT, BLOB, DATE, TIME, TIMESTAMP, ENUM, SET…
+                    {
+                        // cap initial alloc to 64 KB; handle truncation below
+                        unsigned long bufLen = (f.length > 0 && f.length <= 65536)
+                                                   ? f.length + 1
+                                                   : 4096;
+                        cs.buffer.resize(bufLen);
+                        bool isBinary = (f.flags & BINARY_FLAG) &&
+                                        (f.type == MYSQL_TYPE_BLOB       ||
+                                         f.type == MYSQL_TYPE_TINY_BLOB  ||
+                                         f.type == MYSQL_TYPE_MEDIUM_BLOB||
+                                         f.type == MYSQL_TYPE_LONG_BLOB);
+                        cs.bind.buffer_type   = isBinary ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING;
+                        cs.bind.buffer        = cs.buffer.data();
+                        cs.bind.buffer_length = cs.buffer.size();
+                    }
+                    break;
+            }
         }
 
-        SQLINTEGER i = 0;
-        SQLINTEGER native;
-        SQLCHAR state[7];
-        SQLCHAR text[256];
-        SQLSMALLINT len;
-        SQLRETURN ret;
+        // Build a contiguous MYSQL_BIND array whose internal pointers reference
+        // the (stable) ColStorage elements.
+        std::vector<MYSQL_BIND> resultBinds(numCols);
+        for (int i = 0; i < numCols; ++i)
+            resultBinds[i] = cols[i].bind;
 
-        std::string errors;
-        do
+        if (mysql_stmt_bind_result(stmt, resultBinds.data()))
+            throw std::runtime_error(
+                std::string("[MySQLDatabase::FetchFromStatement] bind_result: ") +
+                ExtractStmtError(stmt));
+
+        // Store all rows in client memory (simplifies truncation handling)
+        if (mysql_stmt_store_result(stmt))
+            throw std::runtime_error(
+                std::string("[MySQLDatabase::FetchFromStatement] store_result: ") +
+                ExtractStmtError(stmt));
+
+        std::vector<omnisphere::types::DataTable::Row> rows;
+
+        int fetchRet;
+        while ((fetchRet = mysql_stmt_fetch(stmt)) == 0 ||
+               fetchRet == MYSQL_DATA_TRUNCATED)
         {
-            ret = SQLGetDiagRec(type, handle, ++i, state, &native, text, sizeof(text),
-                                &len);
+            omnisphere::types::DataTable::Row row;
 
-            if (SQL_SUCCEEDED(ret))
+            for (int i = 0; i < numCols; ++i)
             {
-                errors += "SQL State: ";
-                errors += reinterpret_cast<const char *>(state);
-                errors += "\nMessage: ";
-                errors += std::string(reinterpret_cast<const char *>(text), len);
-            }
-            else if (ret == SQL_INVALID_HANDLE)
-            {
-                errors += "[ExtractError] SQL_INVALID_HANDLE";
-                break;
-            }
-        } while (ret == SQL_SUCCESS);
+                ColStorage&  cs    = cols[i];
+                MYSQL_FIELD& f     = fields[i];
+                std::string  col   = f.name;
 
-        return errors;
+                if (cs.isNull)
+                {
+                    row.Set(col, std::nullopt);
+                    continue;
+                }
+
+                // Handle truncation for variable-length columns
+                if (fetchRet == MYSQL_DATA_TRUNCATED && cs.error)
+                {
+                    // Re-fetch this column with exact size
+                    cs.buffer.resize(cs.length + 1);
+                    resultBinds[i].buffer        = cs.buffer.data();
+                    resultBinds[i].buffer_length = cs.buffer.size();
+                    cs.error = 0;
+                    mysql_stmt_fetch_column(stmt, &resultBinds[i],
+                                            static_cast<unsigned int>(i), 0);
+                }
+
+                switch (f.type)
+                {
+                    case MYSQL_TYPE_TINY:
+                        // TINYINT(1) / BOOLEAN → bool; TINYINT(n>1) → int
+                        if (f.length == 1)
+                            row.Set(col, cs.i8 != 0);
+                        else
+                            row.Set(col, static_cast<int>(cs.i8));
+                        break;
+
+                    case MYSQL_TYPE_SHORT:
+                    case MYSQL_TYPE_YEAR:
+                    case MYSQL_TYPE_INT24:
+                    case MYSQL_TYPE_LONG:
+                        row.Set(col, cs.i32);
+                        break;
+
+                    case MYSQL_TYPE_LONGLONG:
+                        // Store as int (DataTable limitation for very large values)
+                        row.Set(col, static_cast<int>(cs.i64));
+                        break;
+
+                    case MYSQL_TYPE_FLOAT:
+                        row.Set(col, static_cast<double>(cs.f32));
+                        break;
+
+                    case MYSQL_TYPE_DOUBLE:
+                        row.Set(col, cs.f64);
+                        break;
+
+                    case MYSQL_TYPE_DECIMAL:
+                    case MYSQL_TYPE_NEWDECIMAL:
+                        try { row.Set(col, std::stod(std::string(cs.buffer.data(), cs.length))); }
+                        catch (...) { row.Set(col, std::nullopt); }
+                        break;
+
+                    default:
+                    {
+                        bool isBinary = (f.flags & BINARY_FLAG) &&
+                                        (f.type == MYSQL_TYPE_BLOB       ||
+                                         f.type == MYSQL_TYPE_TINY_BLOB  ||
+                                         f.type == MYSQL_TYPE_MEDIUM_BLOB||
+                                         f.type == MYSQL_TYPE_LONG_BLOB);
+                        if (isBinary)
+                        {
+                            auto* ptr = reinterpret_cast<uint8_t*>(cs.buffer.data());
+                            row.Set(col, std::vector<uint8_t>(ptr, ptr + cs.length));
+                        }
+                        else
+                        {
+                            row.Set(col, std::string(cs.buffer.data(), cs.length));
+                        }
+                        break;
+                    }
+                }
+            }
+            rows.push_back(std::move(row));
+        }
+
+        mysql_free_result(meta);
+
+        omnisphere::types::DataTable table;
+        table.Fill(rows);
+        return table;
     }
 
-    MySQLDatabase::MySQLDatabase()
-        : henv(SQL_NULL_HENV), hdbc(SQL_NULL_HDBC), hstmt(SQL_NULL_HSTMT) {}
+    // ─── Constructor / Destructor ─────────────────────────────────────────────
 
-    MySQLDatabase::~MySQLDatabase()
+    MySQLDatabase::MySQLDatabase()  = default;
+    MySQLDatabase::~MySQLDatabase() { Disconnect(); }
 
-    { Disconnect(); }
-
-    void MySQLDatabase::ConnectionString(const std::string &connectionString)
+    void MySQLDatabase::ConnectionString(const std::string& cs)
     {
-        this->_ConnectionString = connectionString;
+        _connectionString = cs;
+        ParseConnectionString(cs);
     }
+
+    // ─── Connect / Disconnect ─────────────────────────────────────────────────
 
     bool MySQLDatabase::Connect()
     {
-        if (_ConnectionString.empty())
-        {
+        if (_connectionString.empty())
             throw std::runtime_error("[MySQLDatabase::Connect] Connection string is empty.");
-        }
 
-        try
+        // MySQL C API: one connection per thread
+        mysql_thread_init();
+
+        if (_conn)
         {
-            SQLRETURN ret;
-
-            std::string connString = _ConnectionString;
-
-            ret = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &henv);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("SQLAllocHandle ENV", henv, SQL_HANDLE_ENV));
-
-            ret = SQLSetEnvAttr(henv, SQL_ATTR_ODBC_VERSION, (void *)SQL_OV_ODBC3, 0);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("SQLSetEnvAttr", henv, SQL_HANDLE_ENV));
-
-            ret = SQLAllocHandle(SQL_HANDLE_DBC, henv, &hdbc);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("SQLAllocHandle DBC", henv, SQL_HANDLE_ENV));
-
-            ret = SQLDriverConnect(hdbc, nullptr, (SQLCHAR *)connString.c_str(),
-                                   SQL_NTS, nullptr, 0, nullptr, SQL_DRIVER_NOPROMPT);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("SQLConnect", hdbc, SQL_HANDLE_DBC));
-
-            return true;
+            mysql_close(_conn);
+            _conn = nullptr;
         }
-        catch (const std::exception &e)
+
+        _conn = mysql_init(nullptr);
+        if (!_conn)
+            throw std::runtime_error("[MySQLDatabase::Connect] mysql_init failed.");
+
+        // Enable automatic reconnect
+        my_bool reconnect = 1;
+        mysql_options(_conn, MYSQL_OPT_RECONNECT, &reconnect);
+
+        if (!mysql_real_connect(_conn,
+                                _host.c_str(),
+                                _user.c_str(),
+                                _password.c_str(),
+                                _database.empty() ? nullptr : _database.c_str(),
+                                _port,
+                                nullptr,  // unix socket
+                                0))       // client flags
         {
-            throw std::runtime_error(std::string("[MySQLDatabase::Connect] ") + e.what());
+            std::string err = ExtractError();
+            mysql_close(_conn);
+            _conn = nullptr;
+            throw std::runtime_error("[MySQLDatabase::Connect] " + err);
         }
+
+        // UTF-8 by default
+        mysql_set_character_set(_conn, "utf8mb4");
+        return true;
     }
 
     void MySQLDatabase::Disconnect()
     {
-        try
+        if (_conn)
         {
-            if (hdbc != SQL_NULL_HDBC)
-            {
-                SQLDisconnect(hdbc);
-                SQLFreeHandle(SQL_HANDLE_DBC, hdbc);
-                hdbc = SQL_NULL_HDBC;
-            }
-
-            if (henv != SQL_NULL_HENV)
-            {
-                SQLFreeHandle(SQL_HANDLE_ENV, henv);
-                henv = SQL_NULL_HENV;
-            }
+            mysql_close(_conn);
+            _conn = nullptr;
+            mysql_thread_end();
         }
-        catch (const std::exception &e)
-        {
+    }
+
+    // ─── RunStatement ─────────────────────────────────────────────────────────
+
+    bool MySQLDatabase::RunStatement(const std::string& query, const std::string& context)
+    {
+        LogSQL(context, query);
+        if (!_conn)
+            throw std::runtime_error("[MySQLDatabase::RunStatement] Not connected.");
+
+        if (mysql_real_query(_conn, query.c_str(),
+                             static_cast<unsigned long>(query.size())))
             throw std::runtime_error(
-                std::string("[MySQLDatabase::Disconnect] ") + e.what() + "\n" +
-                ExtractError("MySQLDatabase::Disconnect", hdbc, SQL_HANDLE_DBC));
-        }
+                std::string("[MySQLDatabase::RunStatement] ") + ExtractError());
+
+        // Consume any result set (e.g. from stored procedures)
+        if (MYSQL_RES* res = mysql_store_result(_conn))
+            mysql_free_result(res);
+
+        return true;
     }
 
-    void MySQLDatabase::PrepareStatement(const std::string &query)
+    // ─── RunPrepared ──────────────────────────────────────────────────────────
+
+    bool MySQLDatabase::RunPrepared(const std::string& query,
+                                    const std::vector<omnisphere::types::SQLParam>& params,
+                                    const std::string& context)
     {
+        LogSQL(context, query, params);
+        if (!_conn)
+            throw std::runtime_error("[MySQLDatabase::RunPrepared] Not connected.");
+
+        MYSQL_STMT* stmt = mysql_stmt_init(_conn);
+        if (!stmt)
+            throw std::runtime_error("[MySQLDatabase::RunPrepared] mysql_stmt_init failed.");
+
         try
         {
-            if (hstmt != SQL_NULL_HSTMT)
-            {
-                SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-                hstmt = SQL_NULL_HSTMT;
-            }
-
-            SQLRETURN ret = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
-
-            if (!SQL_SUCCEEDED(ret))
+            if (mysql_stmt_prepare(stmt, query.c_str(),
+                                   static_cast<unsigned long>(query.size())))
                 throw std::runtime_error(
-                    ExtractError("SQLAllocHandle", hdbc, SQL_HANDLE_DBC));
+                    std::string("[MySQLDatabase::RunPrepared] prepare: ") +
+                    ExtractStmtError(stmt));
 
-            ret = SQLPrepare(hstmt, (SQLCHAR *)query.c_str(), SQL_NTS);
+            std::vector<ParamStorage> storage;
+            std::vector<MYSQL_BIND>   binds;
+            BuildParamBinds(params, storage, binds);
 
-            if (!SQL_SUCCEEDED(ret))
+            if (!binds.empty() && mysql_stmt_bind_param(stmt, binds.data()))
                 throw std::runtime_error(
-                    ExtractError("SQLPrepare", hstmt, SQL_HANDLE_STMT));
-        }
-        catch (const std::exception &ex)
-        {
-            throw std::runtime_error(std::string("[MySQLDatabase::PrepareStatement] ") +
-                                     ex.what());
-        }
-    }
+                    std::string("[MySQLDatabase::RunPrepared] bind_param: ") +
+                    ExtractStmtError(stmt));
 
-    bool MySQLDatabase::RunStatement(const std::string &query, const std::string& context)
-    {
-        try
-        {
-            SQLRETURN ret;
-
-            if (hstmt != SQL_NULL_HSTMT)
-            {
-                SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-                hstmt = SQL_NULL_HSTMT;
-            }
-
-            ret = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
-
-            if (!SQL_SUCCEEDED(ret))
+            if (mysql_stmt_execute(stmt))
                 throw std::runtime_error(
-                    ExtractError("SQLAllocHandle", hdbc, SQL_HANDLE_DBC));
+                    std::string("[MySQLDatabase::RunPrepared] execute: ") +
+                    ExtractStmtError(stmt));
 
-            ret = SQLExecDirect(hstmt, (SQLCHAR *)query.c_str(), SQL_NTS);
-
-            LogSQL(context, query);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("MySQLDatabase::RunStatement", hstmt, SQL_HANDLE_STMT) +
-                    query + "\n");
-
+            mysql_stmt_close(stmt);
             return true;
         }
-        catch (const std::exception &e)
+        catch (...)
         {
-            throw std::runtime_error(std::string("[MySQLDatabase::RunStatement] ") +
-                                     e.what());
+            mysql_stmt_close(stmt);
+            throw;
         }
     }
+
+    // ─── FetchPrepared (SQLParam) ─────────────────────────────────────────────
+
+    omnisphere::types::DataTable MySQLDatabase::FetchPrepared(
+        const std::string& query,
+        const std::vector<omnisphere::types::SQLParam>& params,
+        const std::string& context)
+    {
+        LogSQL(context, query, params);
+        if (!_conn)
+            throw std::runtime_error("[MySQLDatabase::FetchPrepared] Not connected.");
+
+        MYSQL_STMT* stmt = mysql_stmt_init(_conn);
+        if (!stmt)
+            throw std::runtime_error("[MySQLDatabase::FetchPrepared] mysql_stmt_init failed.");
+
+        try
+        {
+            if (mysql_stmt_prepare(stmt, query.c_str(),
+                                   static_cast<unsigned long>(query.size())))
+                throw std::runtime_error(
+                    std::string("[MySQLDatabase::FetchPrepared] prepare: ") +
+                    ExtractStmtError(stmt));
+
+            std::vector<ParamStorage> storage;
+            std::vector<MYSQL_BIND>   binds;
+            BuildParamBinds(params, storage, binds);
+
+            if (!binds.empty() && mysql_stmt_bind_param(stmt, binds.data()))
+                throw std::runtime_error(
+                    std::string("[MySQLDatabase::FetchPrepared] bind_param: ") +
+                    ExtractStmtError(stmt));
+
+            if (mysql_stmt_execute(stmt))
+                throw std::runtime_error(
+                    std::string("[MySQLDatabase::FetchPrepared] execute: ") +
+                    ExtractStmtError(stmt));
+
+            auto table = FetchFromStatement(stmt);
+            mysql_stmt_close(stmt);
+            return table;
+        }
+        catch (...)
+        {
+            mysql_stmt_close(stmt);
+            throw;
+        }
+    }
+
+    // ─── FetchPrepared (strings) ──────────────────────────────────────────────
+
+    omnisphere::types::DataTable MySQLDatabase::FetchPrepared(
+        const std::string& query,
+        const std::vector<std::string>& params,
+        const std::string& context)
+    {
+        std::vector<omnisphere::types::SQLParam> converted;
+        converted.reserve(params.size());
+        for (const auto& s : params) converted.push_back(s);
+        return FetchPrepared(query, converted, context);
+    }
+
+    // ─── FetchPrepared (single string) ────────────────────────────────────────
+
+    omnisphere::types::DataTable MySQLDatabase::FetchPrepared(
+        const std::string& query,
+        const std::string& param,
+        const std::string& context)
+    {
+        return FetchPrepared(query,
+                             std::vector<omnisphere::types::SQLParam>{param},
+                             context);
+    }
+
+    // ─── FetchResults ─────────────────────────────────────────────────────────
+
+    omnisphere::types::DataTable MySQLDatabase::FetchResults(const std::string& query,
+                                                              const std::string& context)
+    {
+        // Use prepared statement path for consistency (no params)
+        return FetchPrepared(query, std::vector<omnisphere::types::SQLParam>{}, context);
+    }
+
+    // ─── Transactions ─────────────────────────────────────────────────────────
 
     bool MySQLDatabase::BeginTransaction()
     {
         try
         {
-            SQLRETURN ret = SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT,
-                                              (SQLPOINTER)SQL_AUTOCOMMIT_OFF, 0);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("MySQLDatabase::BeginTransaction", hdbc, SQL_HANDLE_DBC));
-
+            if (mysql_autocommit(_conn, 0))
+                throw std::runtime_error(ExtractError());
             return true;
         }
-        catch (const std::exception &e)
-        {
-            throw std::runtime_error(std::string("[MySQLDatabase::BeginTransaction] ") +
-                                     e.what());
-        }
+        catch (const std::exception& e)
+        { throw std::runtime_error(std::string("[MySQLDatabase::BeginTransaction] ") + e.what()); }
     }
 
     bool MySQLDatabase::CommitTransaction()
     {
         try
         {
-            SQLRETURN ret = SQLEndTran(SQL_HANDLE_DBC, hdbc, SQL_COMMIT);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("Commit Error", hdbc, SQL_HANDLE_DBC));
-
-            ret = SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT,
-                                    (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("MySQLDatabase::Commit", hdbc, SQL_HANDLE_DBC));
-
+            if (mysql_commit(_conn))
+                throw std::runtime_error(ExtractError());
+            if (mysql_autocommit(_conn, 1))
+                throw std::runtime_error(ExtractError());
             return true;
         }
-        catch (const std::exception &e)
-        {
-            throw std::runtime_error(std::string("[MySQLDatabase::Commit] ") + e.what());
-        }
+        catch (const std::exception& e)
+        { throw std::runtime_error(std::string("[MySQLDatabase::CommitTransaction] ") + e.what()); }
     }
 
     bool MySQLDatabase::RollbackTransaction()
     {
         try
         {
-            SQLRETURN ret = SQLEndTran(SQL_HANDLE_DBC, hdbc, SQL_ROLLBACK);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("MySQLDatabase::Rollback", hdbc, SQL_HANDLE_DBC));
-
-            ret = SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT,
-                                    (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("MySQLDatabase::Rollback", hdbc, SQL_HANDLE_DBC));
-
+            if (mysql_rollback(_conn))
+                throw std::runtime_error(ExtractError());
+            if (mysql_autocommit(_conn, 1))
+                throw std::runtime_error(ExtractError());
             return true;
         }
-        catch (const std::exception &e)
-        {
-            throw std::runtime_error(std::string("[MySQLDatabase::Rollback] ") + e.what());
-        }
-    }
-
-    bool MySQLDatabase::RunPrepared(
-        const std::string &query,
-        const std::vector<omnisphere::types::SQLParam> &params,
-        const std::string& context)
-    {
-        try
-        {
-            SQLRETURN retcode;
-
-            if (hstmt != SQL_NULL_HSTMT)
-            {
-                SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-                hstmt = SQL_NULL_HSTMT;
-            }
-
-            retcode = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
-
-            if (!SQL_SUCCEEDED(retcode))
-                throw std::runtime_error(
-                    ExtractError("SQLAllocHandle", hdbc, SQL_HANDLE_DBC));
-
-            retcode = SQLPrepare(hstmt, (SQLCHAR *)query.c_str(), SQL_NTS);
-
-            if (!SQL_SUCCEEDED(retcode))
-                throw std::runtime_error(
-                    ExtractError("SQLPrepare", hstmt, SQL_HANDLE_STMT));
-
-            stringStorage.clear();
-            stringStorage.reserve(params.size());
-
-            intStorage.clear();
-            intStorage.reserve(params.size());
-
-            binaryStorage.clear();
-            binaryStorage.reserve(params.size());
-
-            indStorage.clear();
-            indStorage.resize(params.size());
-
-            doubleStorage.clear();
-            doubleStorage.resize(params.size());
-
-            SQLUSMALLINT paramIndex = 1;
-
-            struct ParamVisitor
-            {
-                SQLHSTMT hstmt;
-                SQLUSMALLINT paramIndex;
-                std::vector<SQLLEN> &indStorage;
-                std::vector<int> &intStorage;
-                std::vector<double> &doubleStorage;
-                std::vector<std::string> &stringStorage;
-                std::vector<std::vector<uint8_t>> &binaryStorage;
-
-                SQLRETURN operator()(const std::monostate &) const
-                {
-                    static char dummy = 0;
-                    indStorage[paramIndex - 1] = SQL_NULL_DATA;
-
-                    return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                            SQL_VARCHAR, 0, 0, &dummy, 0,
-                                            &indStorage[paramIndex - 1]);
-                }
-
-                SQLRETURN operator()(const int &value) const
-                {
-                    intStorage.push_back(value);
-                    indStorage[paramIndex - 1] = sizeof(int);
-
-                    return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_SLONG,
-                                            SQL_INTEGER, 0, 0, &intStorage.back(), 0,
-                                            &indStorage[paramIndex - 1]);
-                }
-
-                SQLRETURN operator()(const double &value) const
-                {
-                    doubleStorage.push_back(value);
-                    indStorage[paramIndex - 1] = sizeof(double);
-
-                    return SQLBindParameter(
-                        hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_DOUBLE, SQL_DOUBLE, 0, 0,
-                        &doubleStorage.back(), 0, &indStorage[paramIndex - 1]);
-                }
-
-                SQLRETURN operator()(const std::string &value) const
-                {
-                    stringStorage.emplace_back(value);
-                    std::string &storedStr = stringStorage.back();
-                    indStorage[paramIndex - 1] = static_cast<SQLLEN>(storedStr.size());
-
-                    return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                            SQL_VARCHAR, indStorage[paramIndex - 1], 0,
-                                            (SQLPOINTER)storedStr.c_str(), 0,
-                                            &indStorage[paramIndex - 1]);
-                }
-
-                SQLRETURN operator()(const std::vector<uint8_t> &value) const
-                {
-                    binaryStorage.push_back(value);
-                    std::vector<uint8_t> &storedBin = binaryStorage.back();
-                    indStorage[paramIndex - 1] = static_cast<SQLLEN>(storedBin.size());
-
-                    return SQLBindParameter(
-                        hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_BINARY, SQL_VARBINARY,
-                        indStorage[paramIndex - 1], 0, (SQLPOINTER)storedBin.data(),
-                        indStorage[paramIndex - 1], &indStorage[paramIndex - 1]);
-                }
-
-                SQLRETURN operator()(const bool &value) const
-                {
-                    std::string ynValue = value ? "Y" : "N";
-                    stringStorage.emplace_back(ynValue);
-                    std::string &storedStr = stringStorage.back();
-                    indStorage[paramIndex - 1] = static_cast<SQLLEN>(storedStr.size());
-
-                    return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                            SQL_VARCHAR, indStorage[paramIndex - 1], 0,
-                                            (SQLPOINTER)storedStr.c_str(), 0,
-                                            &indStorage[paramIndex - 1]);
-                }
-            };
-
-            for (const omnisphere::types::SQLParam &param : params)
-            {
-                ParamVisitor visitor
-
-                {hstmt,        paramIndex,    indStorage,
-                    intStorage,   doubleStorage, stringStorage,
-                    binaryStorage};
-                retcode = std::visit(visitor, param);
-
-                if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
-                {
-                    throw std::runtime_error("Error binding parameter " +
-                                             std::to_string(paramIndex));
-                }
-
-                paramIndex++;
-            }
-            LogSQL(context, query, params);
-            retcode = SQLExecute(hstmt);
-
-            if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
-                throw std::runtime_error(
-                    ExtractError("SQLExecute", hstmt, SQL_HANDLE_STMT));
-
-            SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-            hstmt = SQL_NULL_HSTMT;
-
-            return true;
-        }
-        catch (const std::exception &ex)
-        {
-            if (hstmt != SQL_NULL_HSTMT)
-            {
-                SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-                hstmt = SQL_NULL_HSTMT;
-            }
-            omnisphere::utils::Logger::LogTrace("MySQLDatabase", std::string("RunPrepared Exception: ") + ex.what());
-            throw std::runtime_error(std::string("[MySQLDatabase::RunPrepared Exception] ") +
-                                     ex.what());
-        }
-    }
-
-    omnisphere::types::DataTable MySQLDatabase::FetchResults(const std::string &query, const std::string& context)
-    {
-        omnisphere::types::DataTable dataTable;
-
-        try
-        {
-            if (hstmt != SQL_NULL_HSTMT)
-            {
-                SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-                hstmt = SQL_NULL_HSTMT;
-            }
-
-            SQLRETURN ret = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("SQLAllocHandle", hdbc, SQL_HANDLE_DBC));
-
-            SQLRETURN retcode = SQLExecDirect(hstmt, (SQLCHAR *)query.c_str(), SQL_NTS);
-            LogSQL(context, query);
-
-            if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
-                throw std::runtime_error(
-                    ExtractError("SQLExecDirect", hstmt, SQL_HANDLE_STMT));
-
-            SQLSMALLINT columnCount;
-            SQLNumResultCols(hstmt, &columnCount);
-
-            std::vector<std::string> columnNames(columnCount);
-            std::vector<SQLSMALLINT> nativeTypes(columnCount);
-
-            SQLCHAR columnName[256];
-            SQLSMALLINT columnNameLength, dataType, decimalDigits, nullable;
-            SQLULEN columnSize;
-
-            for (SQLUSMALLINT i = 1; i <= columnCount; ++i)
-            {
-                SQLDescribeCol(hstmt, i, columnName, sizeof(columnName),
-                               &columnNameLength, &nativeTypes[i - 1], &columnSize,
-                               &decimalDigits, &nullable);
-
-                columnNames[i - 1] =
-                std::string(reinterpret_cast<char *>(columnName), columnNameLength);
-            }
-
-            std::vector<omnisphere::types::DataTable::Row> rows;
-
-            while (SQLFetch(hstmt) == SQL_SUCCESS)
-            {
-                omnisphere::types::DataTable::Row row;
-
-                for (SQLUSMALLINT i = 1; i <= columnCount; ++i)
-                {
-                    SQLLEN indicator = 0;
-                    SQLSMALLINT nativeType = nativeTypes[i - 1];
-                    const std::string &colName = columnNames[i - 1];
-
-                    try
-                    {
-                        if (nativeType == SQL_VARBINARY || nativeType == SQL_BINARY)
-                        {
-                            std::vector<uint8_t> buffer(512);
-                            SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_BINARY, buffer.data(),
-                                                       (SQLLEN)buffer.size(), &indicator);
-
-                            if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
-                            {
-                                if (indicator == SQL_NULL_DATA)
-                                {
-                                    row.Set(colName, std::nullopt);
-                                }
-                                else
-                                {
-                                    size_t size = (indicator > 0 &&
-                                                   indicator < static_cast<SQLLEN>(buffer.size()))
-                                    ? static_cast<size_t>(indicator)
-                                        : buffer.size();
-                                    buffer.resize(size);
-                                    row.Set(colName, buffer);
-                                }
-                            }
-                        }
-                        else if (nativeType == SQL_BIT)
-                        {
-                            char val;
-                            SQLRETURN ret =
-                            SQLGetData(hstmt, i, SQL_C_BIT, &val, sizeof(val), &indicator);
-
-                            if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
-                            {
-                                if (indicator == SQL_NULL_DATA)
-                                {
-                                    row.Set(colName, std::nullopt);
-                                }
-                                else
-                                {
-                                    bool boolVal = (val != 0);
-                                    row.Set(colName, boolVal);
-                                }
-                            }
-                        }
-                        else if (nativeType == SQL_INTEGER || nativeType == SQL_SMALLINT ||
-                                 nativeType == SQL_TINYINT)
-                        {
-                                int valInt = 0;
-                            SQLRETURN ret =
-                            SQLGetData(hstmt, i, SQL_C_SLONG, &valInt, 0, &indicator);
-
-                            if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
-                            {
-                                if (indicator == SQL_NULL_DATA)
-                                {
-                                    row.Set(colName, std::nullopt);
-                                }
-                                else
-                                {
-                                    row.Set(colName, valInt);
-                                }
-                            }
-                        }
-                        else if (nativeType == SQL_DECIMAL || nativeType == SQL_NUMERIC ||
-                                 nativeType == SQL_REAL || nativeType == SQL_FLOAT ||
-                                 nativeType == SQL_DOUBLE)
-                        {
-                                double valDouble = 0.0;
-                            SQLRETURN ret =
-                            SQLGetData(hstmt, i, SQL_C_DOUBLE, &valDouble, 0, &indicator);
-
-                            if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
-                            {
-                                if (indicator == SQL_NULL_DATA)
-                                {
-                                    row.Set(colName, std::nullopt);
-                                }
-                                else
-                                {
-                                    row.Set(colName, valDouble);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            char buffer[1024] = {0};
-                            SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_CHAR, buffer,
-                                                       sizeof(buffer), &indicator);
-
-                            if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
-                            {
-                                if (indicator == SQL_NULL_DATA)
-                                {
-                                    row.Set(colName, std::nullopt);
-                                }
-                                else
-                                {
-                                    std::string valStr(buffer);
-                                    row.Set(colName, valStr);
-                                }
-                            }
-                        }
-                    }
-                    catch (...)
-                    {
-                        row.Set(colName, std::nullopt);
-                    }
-                }
-
-                rows.push_back(std::move(row));
-            }
-
-            dataTable.Fill(rows);
-
-            SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-            hstmt = SQL_NULL_HSTMT;
-
-            return dataTable;
-        }
-        catch (const std::exception &ex)
-        {
-            throw std::runtime_error(std::string("[MySQLDatabase::FetchResults] Exception: ") +
-                                     ex.what());
-        }
-    }
-
-    omnisphere::types::DataTable
-    MySQLDatabase::FetchPrepared(const std::string &query,
-                                 const std::vector<std::string> &params,
-                                 const std::string& context)
-    {
-        omnisphere::types::DataTable dataTable;
-
-        try
-        {
-            PrepareStatement(query);
-
-            for (size_t i = 0; i < params.size(); ++i)
-            {
-                SQLRETURN retcode = SQLBindParameter(
-                    hstmt, static_cast<SQLUSMALLINT>(i + 1), SQL_PARAM_INPUT, SQL_C_CHAR,
-                    SQL_VARCHAR, 0, 0, (SQLPOINTER)params[i].c_str(), 0, nullptr);
-
-                if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
-                    throw std::runtime_error("Error binding parameter " +
-                                             std::to_string(i + 1));
-            }
-
-            LogSQL(context, query, params);
-            SQLRETURN retcode = SQLExecute(hstmt);
-
-            if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
-                throw std::runtime_error(
-                    ExtractError("SQLExecute", hstmt, SQL_HANDLE_STMT));
-
-            SQLSMALLINT columnCount;
-            SQLNumResultCols(hstmt, &columnCount);
-
-            std::vector<std::string> columnNames(columnCount);
-            std::vector<SQLSMALLINT> nativeTypes(columnCount);
-
-            SQLCHAR columnName[256];
-            SQLSMALLINT columnNameLength, decimalDigits, nullable;
-            SQLULEN columnSize;
-
-            for (SQLUSMALLINT i = 1; i <= columnCount; ++i)
-            {
-                SQLDescribeCol(hstmt, i, columnName, sizeof(columnName),
-                               &columnNameLength, &nativeTypes[i - 1], &columnSize,
-                               &decimalDigits, &nullable);
-                columnNames[i - 1] =
-                std::string(reinterpret_cast<char *>(columnName), columnNameLength);
-            }
-
-            std::vector<omnisphere::types::DataTable::Row> rows;
-
-            while (SQLFetch(hstmt) == SQL_SUCCESS)
-            {
-                omnisphere::types::DataTable::Row row;
-
-                for (SQLUSMALLINT i = 1; i <= columnCount; ++i)
-                {
-                    SQLLEN indicator = 0;
-                    SQLSMALLINT nativeType = nativeTypes[i - 1];
-                    const std::string &colName = columnNames[i - 1];
-
-                    if (nativeType == SQL_VARBINARY || nativeType == SQL_BINARY)
-                    {
-                        std::vector<uint8_t> buffer(512);
-                        SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_BINARY, buffer.data(),
-                                                   (SQLLEN)buffer.size(), &indicator);
-
-                        if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
-                        {
-                            if (indicator == SQL_NULL_DATA)
-                            {
-                                row.Set(colName, std::nullopt);
-                            }
-                            else
-                            {
-                                size_t size = (indicator > 0 &&
-                                               indicator < static_cast<SQLLEN>(buffer.size()))
-                                ? static_cast<size_t>(indicator)
-                                    : buffer.size();
-                                buffer.resize(size);
-                                row.Set(colName, buffer);
-                            }
-                        }
-                        else
-                        {
-                            row.Set(colName, std::nullopt);
-                        }
-                    }
-                    else if (nativeType == SQL_INTEGER || nativeType == SQL_BIGINT ||
-                             nativeType == SQL_SMALLINT || nativeType == SQL_TINYINT)
-                    {
-                            int valInt = 0;
-                        SQLRETURN ret =
-                        SQLGetData(hstmt, i, SQL_C_SLONG, &valInt, 0, &indicator);
-
-                        if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
-                        {
-                            if (indicator == SQL_NULL_DATA)
-                            {
-                                row.Set(colName, std::nullopt);
-                            }
-                            else
-                            {
-                                row.Set(colName, valInt);
-                            }
-                        }
-                        else
-                        {
-                            row.Set(colName, std::nullopt);
-                        }
-                    }
-                    else if (nativeType == SQL_DOUBLE || nativeType == SQL_FLOAT ||
-                             nativeType == SQL_REAL || nativeType == SQL_DECIMAL ||
-                             nativeType == SQL_NUMERIC)
-                    {
-                            double valDouble = 0.0;
-                        SQLRETURN ret =
-                        SQLGetData(hstmt, i, SQL_C_DOUBLE, &valDouble, 0, &indicator);
-
-                        if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
-                        {
-                            if (indicator == SQL_NULL_DATA)
-                            {
-                                row.Set(colName, std::nullopt);
-                            }
-                            else
-                            {
-                                row.Set(colName, valDouble);
-                            }
-                        }
-                        else
-                        {
-                            row.Set(colName, std::nullopt);
-                        }
-                    }
-                    else
-                    {
-                        char buffer[512] = {0};
-                        SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_CHAR, buffer,
-                                                   sizeof(buffer), &indicator);
-
-                        if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
-                        {
-                            if (indicator == SQL_NULL_DATA)
-                            {
-                                row.Set(colName, std::nullopt);
-                            }
-                            else
-                            {
-                                row.Set(colName, std::string(buffer));
-                            }
-                        }
-                        else
-                        {
-                            row.Set(colName, std::nullopt);
-                        }
-                    }
-                }
-
-                rows.push_back(std::move(row));
-            }
-
-            SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-            hstmt = nullptr;
-
-            dataTable.Fill(rows);
-
-            return dataTable;
-        }
-        catch (const std::exception &ex)
-        {
-            throw std::runtime_error(std::string("[MySQLDatabase::FetchPrepared] Exception: ") +
-                                     ex.what());
-        }
-    }
-
-    omnisphere::types::DataTable MySQLDatabase::FetchPrepared(const std::string &query,
-                                                              const std::string &param,
-                                                              const std::string& context)
-    {
-        return FetchPrepared(query, std::vector<std::string>
-
-        {param}, context);
-    }
-
-    omnisphere::types::DataTable MySQLDatabase::FetchPrepared(
-        const std::string &query,
-        const std::vector<omnisphere::types::SQLParam> &params,
-        const std::string& context)
-    {
-        omnisphere::types::DataTable dataTable;
-
-        try
-        {
-            if (hstmt != SQL_NULL_HSTMT)
-            {
-                SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-                hstmt = SQL_NULL_HSTMT;
-            }
-
-            SQLRETURN ret = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
-
-            if (!SQL_SUCCEEDED(ret))
-                throw std::runtime_error(
-                    ExtractError("SQLAllocHandle", hdbc, SQL_HANDLE_DBC));
-
-            SQLRETURN retcode = SQLPrepare(hstmt, (SQLCHAR *)query.c_str(), SQL_NTS);
-
-            if (!SQL_SUCCEEDED(retcode))
-                throw std::runtime_error(
-                    ExtractError("SQLPrepare", hstmt, SQL_HANDLE_STMT));
-
-            stringStorage.clear();
-            intStorage.clear();
-            binaryStorage.clear();
-            indStorage.clear();
-            indStorage.resize(params.size());
-
-            SQLUSMALLINT paramIndex = 1;
-
-            struct ParamVisitor
-            {
-                SQLHSTMT hstmt;
-                SQLUSMALLINT paramIndex;
-                std::vector<SQLLEN> &indStorage;
-                std::vector<int> &intStorage;
-                std::vector<double> &doubleStorage;
-                std::vector<std::string> &stringStorage;
-                std::vector<std::vector<uint8_t>> &binaryStorage;
-
-                SQLRETURN operator()(const std::monostate &) const
-                {
-                    static char dummy = 0;
-                    indStorage[paramIndex - 1] = SQL_NULL_DATA;
-
-                    return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                            SQL_VARCHAR, 0, 0, &dummy, 0,
-                                            &indStorage[paramIndex - 1]);
-                }
-
-                SQLRETURN operator()(const int &value) const
-                {
-                    intStorage.push_back(value);
-                    indStorage[paramIndex - 1] = sizeof(int);
-
-                    return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_SLONG,
-                                            SQL_INTEGER, 0, 0, &intStorage.back(), 0,
-                                            &indStorage[paramIndex - 1]);
-                }
-
-                SQLRETURN operator()(const double &value) const
-                {
-                    doubleStorage.push_back(value);
-                    indStorage[paramIndex - 1] = sizeof(double);
-
-                    return SQLBindParameter(
-                        hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_DOUBLE, SQL_DOUBLE, 0, 0,
-                        &doubleStorage.back(), 0, &indStorage[paramIndex - 1]);
-                }
-
-                SQLRETURN operator()(const std::string &value) const
-                {
-                    stringStorage.emplace_back(value);
-                    std::string &storedStr = stringStorage.back();
-                    indStorage[paramIndex - 1] = static_cast<SQLLEN>(storedStr.size());
-
-                    return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                            SQL_VARCHAR, indStorage[paramIndex - 1], 0,
-                                            (SQLPOINTER)storedStr.c_str(), 0,
-                                            &indStorage[paramIndex - 1]);
-                }
-
-                SQLRETURN operator()(const std::vector<uint8_t> &value) const
-                {
-                    binaryStorage.push_back(value);
-                    std::vector<uint8_t> &storedBin = binaryStorage.back();
-                    indStorage[paramIndex - 1] = static_cast<SQLLEN>(storedBin.size());
-
-                    return SQLBindParameter(
-                        hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_BINARY, SQL_VARBINARY,
-                        indStorage[paramIndex - 1], 0, (SQLPOINTER)storedBin.data(),
-                        indStorage[paramIndex - 1], &indStorage[paramIndex - 1]);
-                }
-
-                SQLRETURN operator()(const bool &value) const
-                {
-                    std::string ynValue = value ? "Y" : "N";
-                    stringStorage.emplace_back(ynValue);
-                    std::string &storedStr = stringStorage.back();
-                    indStorage[paramIndex - 1] = static_cast<SQLLEN>(storedStr.size());
-
-                    return SQLBindParameter(hstmt, paramIndex, SQL_PARAM_INPUT, SQL_C_CHAR,
-                                            SQL_VARCHAR, indStorage[paramIndex - 1], 0,
-                                            (SQLPOINTER)storedStr.c_str(), 0,
-                                            &indStorage[paramIndex - 1]);
-                }
-            };
-
-            for (const omnisphere::types::SQLParam &param : params)
-            {
-                ParamVisitor visitor
-
-                {hstmt,        paramIndex,    indStorage,
-                    intStorage,   doubleStorage, stringStorage,
-                    binaryStorage};
-                retcode = std::visit(visitor, param);
-
-                if (!SQL_SUCCEEDED(retcode))
-                    throw std::runtime_error(
-                        ExtractError("SQLBindParameter", hstmt, SQL_HANDLE_STMT));
-
-                ++paramIndex;
-            }
-
-            LogSQL(context, query, params);
-            retcode = SQLExecute(hstmt);
-
-            if (!SQL_SUCCEEDED(retcode))
-                throw std::runtime_error(
-                    ExtractError("SQLExecute", hstmt, SQL_HANDLE_STMT));
-
-            SQLSMALLINT columnCount;
-            SQLNumResultCols(hstmt, &columnCount);
-
-            std::vector<std::string> columnNames(columnCount);
-            std::vector<SQLSMALLINT> nativeTypes(columnCount);
-
-            SQLCHAR columnName[256];
-            SQLSMALLINT columnNameLength, decimalDigits, nullable;
-            SQLULEN columnSize;
-
-            for (SQLUSMALLINT i = 1; i <= columnCount; ++i)
-            {
-                SQLDescribeCol(hstmt, i, columnName, sizeof(columnName),
-                               &columnNameLength, &nativeTypes[i - 1], &columnSize,
-                               &decimalDigits, &nullable);
-                columnNames[i - 1] =
-                std::string(reinterpret_cast<char *>(columnName), columnNameLength);
-            }
-
-            std::vector<omnisphere::types::DataTable::Row> rows;
-
-            while (SQLFetch(hstmt) == SQL_SUCCESS)
-            {
-                omnisphere::types::DataTable::Row row;
-
-                for (SQLUSMALLINT i = 1; i <= columnCount; ++i)
-                {
-                    SQLLEN indicator = 0;
-                    SQLSMALLINT nativeType = nativeTypes[i - 1];
-
-                    if (nativeType == SQL_VARBINARY || nativeType == SQL_BINARY)
-                    {
-                        std::vector<uint8_t> buffer(512);
-                        SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_BINARY, buffer.data(),
-                                                   (SQLLEN)buffer.size(), &indicator);
-
-                        if (SQL_SUCCEEDED(ret))
-                        {
-                            if (indicator == SQL_NULL_DATA)
-                                row.Set(columnNames[i - 1], std::nullopt);
-                            else
-                            {
-                                buffer.resize(indicator);
-                                row.Set(columnNames[i - 1], buffer);
-                            }
-                        }
-                    }
-                    else if (nativeType == SQL_INTEGER || nativeType == SQL_BIGINT)
-                    {
-                        int valInt = 0;
-                        SQLRETURN ret =
-                        SQLGetData(hstmt, i, SQL_C_SLONG, &valInt, 0, &indicator);
-
-                        if (SQL_SUCCEEDED(ret))
-                        {
-                            if (indicator == SQL_NULL_DATA)
-                                row.Set(columnNames[i - 1], std::nullopt);
-                            else
-                                row.Set(columnNames[i - 1], valInt);
-                        }
-                    }
-                    else
-                    {
-                        char buffer[512];
-                        SQLRETURN ret = SQLGetData(hstmt, i, SQL_C_CHAR, buffer,
-                                                   sizeof(buffer), &indicator);
-
-                        if (SQL_SUCCEEDED(ret))
-                        {
-                            if (indicator == SQL_NULL_DATA)
-                                row.Set(columnNames[i - 1], std::nullopt);
-                            else
-                                row.Set(columnNames[i - 1], std::string(buffer));
-                        }
-                    }
-                }
-
-                rows.push_back(std::move(row));
-            }
-
-            SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-            hstmt = SQL_NULL_HSTMT;
-
-            dataTable.Fill(rows);
-
-            return dataTable;
-        }
-        catch (const std::exception &ex)
-        {
-            if (hstmt != SQL_NULL_HSTMT)
-            {
-                SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
-                hstmt = SQL_NULL_HSTMT;
-            }
-
-            throw std::runtime_error(std::string("[MySQLDatabase::FetchPrepared Exception] ") +
-                                     ex.what());
-        }
+        catch (const std::exception& e)
+        { throw std::runtime_error(std::string("[MySQLDatabase::RollbackTransaction] ") + e.what()); }
     }
 
 } // namespace omnisphere::data

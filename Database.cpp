@@ -52,43 +52,63 @@ namespace omnisphere::data
         bool trustCert,
         bool trustedConn)
     {
+        // Helper: extract host and port from "host:port" or plain "host"
+        auto splitHostPort = [](const std::string& s, const std::string& defaultPort)
+            -> std::pair<std::string, std::string>
+        {
+            size_t pos = s.find(':');
+            if (pos != std::string::npos)
+                return {s.substr(0, pos), s.substr(pos + 1)};
+            return {s, defaultPort};
+        };
+
         std::string connStr;
+
         switch (engine)
         {
+            // ── SQL Server: ODBC (unchanged) ───────────────────────────────
             case DatabaseEngine::SQLServer:
+            {
                 connStr = "Driver={ODBC Driver 18 for SQL Server};Server=" + server + ";";
                 if (!database.empty()) connStr += "Database=" + database + ";";
-                if (trustedConn) {
+                if (trustedConn)
                     connStr += "Trusted_Connection=yes;";
-                } else {
+                else
                     connStr += "Uid=" + user + ";Pwd=" + password + ";";
-                }
-                connStr += "TrustServerCertificate=" + std::string(trustCert ? "yes" : "no") + ";";
+                connStr += "TrustServerCertificate=";
+                connStr += (trustCert ? "yes" : "no");
+                connStr += ";";
                 break;
+            }
 
-            case DatabaseEngine::MySQL:
-                connStr = "Driver={MySQL ODBC 9.4 Driver};Server=" + server + ";";
-                if (!database.empty()) connStr += "Database=" + database + ";";
-                connStr += "User=" + user + ";Password=" + password + ";";
-                break;
-
+            // ── PostgreSQL: libpq key=value format ─────────────────────────
+            // Accepted directly by PQconnectdb().
             case DatabaseEngine::PostgreSQL:
             {
-                std::string host = server;
-                std::string port = "5432";
-                size_t colonPos = server.find(':');
-                if (colonPos != std::string::npos)
-                {
-                    host = server.substr(0, colonPos);
-                    port = server.substr(colonPos + 1);
-                }
-                connStr = "Driver={PostgreSQL Unicode};Server=" + host + ";Port=" + port + ";";
-                if (!database.empty()) connStr += "Database=" + database + ";";
-                connStr += "Uid=" + user + ";Pwd=" + password + ";";
+                auto [host, port] = splitHostPort(server, "5432");
+                connStr  = "host=" + host;
+                connStr += " port=" + port;
+                if (!database.empty()) connStr += " dbname=" + database;
+                connStr += " user=" + user;
+                connStr += " password=" + password;
+                // Optional: connect_timeout, sslmode, etc. can be appended here
+                break;
+            }
+
+            // ── MySQL: semicolon key=value format ──────────────────────────
+            // Parsed by MySQLDatabase::ParseConnectionString().
+            case DatabaseEngine::MySQL:
+            {
+                auto [host, port] = splitHostPort(server, "3306");
+                connStr  = "host=" + host + ";";
+                connStr += "port=" + port + ";";
+                if (!database.empty()) connStr += "dbname=" + database + ";";
+                connStr += "user=" + user + ";";
+                connStr += "password=" + password + ";";
                 break;
             }
         }
         return connStr;
-    }   
+    }
 
 } // namespace omnisphere::data

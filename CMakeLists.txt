@@ -50,6 +50,7 @@ add_library(OmniData SHARED
     SQLServerDatabase.cpp
     MySQLDatabase.cpp
     PostgreSQLDatabase.cpp
+    DatabasePool.cpp
 )
 
 add_library(OmniData::OmniData ALIAS OmniData)
@@ -75,25 +76,83 @@ if(TARGET OmniUtils::OmniUtils)
     endif()
 endif()
 
+# --- Dependencias por plataforma ---
+# ODBC se mantiene SOLO para SQLServerDatabase.
+# PostgreSQL usa libpqxx (C++ wrapper — incluye libpq transitivamente).
+# MySQL usa Connector/C (libmysqlclient / mariadb-libs).
+
 if(ANDROID)
+    # Android: solo SQLServer vía ODBC stub; PG y MySQL excluidos
     target_link_libraries(OmniData PUBLIC
         OmniUtils::OmniUtils
         Boost::json
     )
+
 elseif(WIN32)
     find_library(SODIUM_LIB sodium REQUIRED)
     find_package(Boost REQUIRED COMPONENTS json)
-    target_link_libraries(OmniData PUBLIC odbc32 ${SODIUM_LIB} Boost::json OmniUtils::OmniUtils)
+
+    # PostgreSQL: libpqxx C++ wrapper (incluye libpq transitivamente)
+    # Windows: instalar via vcpkg: vcpkg install libpqxx
+    find_package(libpqxx REQUIRED)
+
+    # MySQL Connector/C (via vcpkg: mysql-connector-c)
+    # On Arch Linux: install mariadb-libs (provides mysqlclient-compatible headers)
+    find_library(MYSQLCLIENT_LIB
+        NAMES mysqlclient libmysqlclient mariadb
+        REQUIRED
+    )
+
+    target_link_libraries(OmniData PUBLIC
+        odbc32                    # SQL Server solamente
+        libpqxx::pqxx             # PostgreSQL (libpqxx → libpq)
+        ${MYSQLCLIENT_LIB}        # MySQL Connector/C
+        ${SODIUM_LIB}
+        Boost::json
+        OmniUtils::OmniUtils
+    )
+
 elseif(APPLE)
     find_library(ODBC_LIB odbc REQUIRED)
     find_library(SODIUM_LIB sodium REQUIRED)
     find_package(Boost REQUIRED COMPONENTS json)
-    target_link_libraries(OmniData PUBLIC ${ODBC_LIB} ${SODIUM_LIB} Boost::json OmniUtils::OmniUtils)
-else()
+    # macOS: brew install libpqxx
+    find_package(libpqxx REQUIRED)
+    find_library(MYSQLCLIENT_LIB
+        NAMES mysqlclient libmysqlclient mariadb
+        HINTS /usr/local/lib /opt/homebrew/lib
+        REQUIRED
+    )
+
+    target_link_libraries(OmniData PUBLIC
+        ${ODBC_LIB}               # SQL Server
+        libpqxx::pqxx             # PostgreSQL
+        ${MYSQLCLIENT_LIB}
+        ${SODIUM_LIB}
+        Boost::json
+        OmniUtils::OmniUtils
+    )
+
+else() # Linux
     find_package(ODBC REQUIRED)
     find_library(SODIUM_LIB sodium REQUIRED)
     find_package(Boost REQUIRED COMPONENTS json)
-    target_link_libraries(OmniData PUBLIC ODBC::ODBC ${SODIUM_LIB} Boost::json OmniUtils::OmniUtils)
+    # Arch Linux: sudo pacman -S libpqxx
+    find_package(libpqxx REQUIRED)
+    find_library(MYSQLCLIENT_LIB
+        NAMES mysqlclient libmysqlclient mariadb
+        HINTS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib /usr/lib64
+        REQUIRED
+    )
+
+    target_link_libraries(OmniData PUBLIC
+        ODBC::ODBC                # SQL Server
+        libpqxx::pqxx             # PostgreSQL (libpqxx → libpq transitivo)
+        ${MYSQLCLIENT_LIB}
+        ${SODIUM_LIB}
+        Boost::json
+        OmniUtils::OmniUtils
+    )
 endif()
 
 set_target_properties(OmniData PROPERTIES
@@ -136,6 +195,7 @@ set(PUBLIC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/SQLServerDatabase.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MySQLDatabase.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/PostgreSQLDatabase.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/DatabasePool.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/DataTable.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/SQLParams.hpp
 )
@@ -174,10 +234,17 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/OmniDataConfig.cmake"
 "include(CMakeFindDependencyMacro)\n"
 "find_dependency(Boost REQUIRED COMPONENTS json)\n"
-"if(NOT WIN32 AND NOT ANDROID)\n"
-"  find_dependency(ODBC REQUIRED)\n"
-"endif()\n"
 "find_dependency(OmniUtils REQUIRED)\n"
+"if(NOT ANDROID)\n"
+"  # ODBC: requerido para SQL Server en todas las plataformas no-Android\n"
+"  if(WIN32)\n"
+"    find_dependency(ODBC REQUIRED)\n"
+"  elseif(NOT ANDROID)\n"
+"    find_dependency(ODBC REQUIRED)\n"
+"  endif()\n"
+"  # PostgreSQL nativo (libpqxx)\n"
+"  find_dependency(libpqxx REQUIRED)\n"
+"endif()\n"
 "include(\"\${CMAKE_CURRENT_LIST_DIR}/OmniDataTargets.cmake\")\n"
 )
 

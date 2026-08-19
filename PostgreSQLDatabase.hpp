@@ -1,76 +1,76 @@
 #pragma once
 
 #include "IDatabase.hpp"
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-#if defined(ANDROID) || defined(__ANDROID__)
-using SQLHENV = void*;
-using SQLHDBC = void*;
-using SQLHSTMT = void*;
-using SQLHANDLE = void*;
-using SQLSMALLINT = short;
-using SQLLEN = int64_t;
-using SQLRETURN = short;
-using SQLCHAR = char;
-#else
-#include <sql.h>
-#include <sqlext.h>
-#endif
+#include <pqxx/pqxx>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace omnisphere::data
 {
+    /// PostgreSQL implementation using libpqxx 7+ (C++ wrapper over libpq).
+    ///
+    /// Transaction model:
+    ///   - Without explicit Begin/Commit: each query runs in its own pqxx::work
+    ///     that is committed immediately after the call.
+    ///   - With explicit BeginTransaction(): a shared pqxx::work is kept alive
+    ///     across calls until CommitTransaction() or RollbackTransaction().
+    ///     On destruction or exception, pqxx auto-rolls back.
     class PostgreSQLDatabase : public IDatabase
     {
-        private:
-        SQLHENV henv;
-        SQLHDBC hdbc;
-        SQLHSTMT hstmt;
+    private:
+        std::unique_ptr<pqxx::connection> _conn;
+        std::unique_ptr<pqxx::work>       _activeTxn; ///< Non-null only between Begin/Commit
+        std::string _connectionString;
 
-        std::string _ConnectionString;
+        /// Convert '?' placeholders to PostgreSQL positional '$N'.
+        static std::string ConvertPlaceholders(const std::string& query);
 
-        void PrepareStatement(const std::string &);
-        std::string ExtractError(const char *, SQLHANDLE, SQLSMALLINT);
+        /// Map SQLParam variant → pqxx::params for exec_params().
+        /// bool/int/double are appended as native types — no Y/N or string casting.
+        static pqxx::params BuildParams(
+            const std::vector<omnisphere::types::SQLParam>& params);
 
-        std::vector<double> doubleStorage;
-        std::vector<std::string> stringStorage;
-        std::vector<std::vector<uint8_t>> binaryStorage;
-        std::vector<int> intStorage;
-        std::vector<SQLLEN> indStorage;
+        /// Read a pqxx::result into a DataTable, dispatching column types by OID.
+        omnisphere::types::DataTable ReadResult(const pqxx::result& res);
 
-        public:
+        /// Execute fn(pqxx::work&):
+        ///   • If an explicit transaction is active → use it (caller commits/rolls back).
+        ///   • Otherwise → create a one-shot pqxx::work, commit after fn returns.
+        template<typename F>
+        auto WithWork(F&& fn) -> std::invoke_result_t<F, pqxx::work&>;
+
+    public:
         PostgreSQLDatabase();
         ~PostgreSQLDatabase() override;
 
-        void ConnectionString(const std::string &connectionString) override;
-
-        bool Connect() override;
+        void ConnectionString(const std::string& cs) override;
+        bool Connect()    override;
         void Disconnect() override;
 
-        bool RunStatement(const std::string &query, const std::string& context = "") override;
-        bool RunPrepared(const std::string &query,
-                         const std::vector<omnisphere::types::SQLParam> &params,
+        bool RunStatement(const std::string& query,
+                          const std::string& context = "") override;
+        bool RunPrepared(const std::string& query,
+                         const std::vector<omnisphere::types::SQLParam>& params,
                          const std::string& context = "") override;
 
         omnisphere::types::DataTable
-        FetchPrepared(const std::string &query,
-                      const std::vector<omnisphere::types::SQLParam> &params,
+        FetchPrepared(const std::string& query,
+                      const std::vector<omnisphere::types::SQLParam>& params,
                       const std::string& context = "") override;
         omnisphere::types::DataTable
-        FetchPrepared(const std::string &query,
-                      const std::vector<std::string> &params,
+        FetchPrepared(const std::string& query,
+                      const std::vector<std::string>& params,
                       const std::string& context = "") override;
-        omnisphere::types::DataTable FetchPrepared(const std::string &query,
-                                                   const std::string &param,
-                                                   const std::string& context = "") override;
-        omnisphere::types::DataTable FetchResults(const std::string &query, const std::string& context = "") override;
+        omnisphere::types::DataTable
+        FetchPrepared(const std::string& query,
+                      const std::string& param,
+                      const std::string& context = "") override;
+        omnisphere::types::DataTable FetchResults(const std::string& query,
+                                                  const std::string& context = "") override;
 
-        bool BeginTransaction() override;
-
-        bool CommitTransaction() override;
+        bool BeginTransaction()    override;
+        bool CommitTransaction()   override;
         bool RollbackTransaction() override;
     };
 

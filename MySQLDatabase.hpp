@@ -1,74 +1,78 @@
 #pragma once
 
 #include "IDatabase.hpp"
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-#if defined(ANDROID) || defined(__ANDROID__)
-using SQLHENV = void*;
-using SQLHDBC = void*;
-using SQLHSTMT = void*;
-using SQLHANDLE = void*;
-using SQLSMALLINT = short;
-using SQLLEN = int64_t;
-using SQLRETURN = short;
-using SQLCHAR = char;
-#else
-#include <sql.h>
-#include <sqlext.h>
-#endif
+#include <mysql/mysql.h>
+#include <string>
+#include <vector>
 
 namespace omnisphere::data
 {
     class MySQLDatabase : public IDatabase
     {
-        private:
-        SQLHENV henv;
-        SQLHDBC hdbc;
-        SQLHSTMT hstmt;
+    private:
+        MYSQL* _conn = nullptr;
+        std::string _connectionString;
 
-        std::string _ConnectionString;
+        // Parsed from connection string
+        std::string  _host;
+        std::string  _user;
+        std::string  _password;
+        std::string  _database;
+        unsigned int _port = 3306;
 
-        void PrepareStatement(const std::string &);
-        std::string ExtractError(const char *, SQLHANDLE, SQLSMALLINT);
-        std::vector<double> doubleStorage;
-        std::vector<std::string> stringStorage;
-        std::vector<std::vector<uint8_t>> binaryStorage;
-        std::vector<int> intStorage;
-        std::vector<SQLLEN> indStorage;
+        std::string ExtractError() const;
+        std::string ExtractStmtError(MYSQL_STMT* stmt) const;
+        void ParseConnectionString(const std::string& cs);
 
-        public:
+        // Build MYSQL_BIND[] for input parameters
+        struct ParamStorage
+        {
+            int8_t            i8  = 0;
+            int32_t           i32 = 0;
+            int64_t           i64 = 0;
+            double            f64 = 0.0;
+            std::string       str;
+            std::vector<uint8_t> blob;
+            my_bool           isNull = 0;
+            unsigned long     length = 0;
+        };
+
+        static void BuildParamBinds(const std::vector<omnisphere::types::SQLParam>& params,
+                                    std::vector<ParamStorage>& storage,
+                                    std::vector<MYSQL_BIND>& binds);
+
+        omnisphere::types::DataTable FetchFromStatement(MYSQL_STMT* stmt);
+
+    public:
         MySQLDatabase();
         ~MySQLDatabase() override;
 
-        void ConnectionString(const std::string &connectionString) override;
+        void ConnectionString(const std::string& connectionString) override;
 
-        bool Connect() override;
+        bool Connect()    override;
         void Disconnect() override;
 
-        bool RunStatement(const std::string &query, const std::string& context = "") override;
-        bool RunPrepared(const std::string &query,
-                         const std::vector<omnisphere::types::SQLParam> &params,
+        bool RunStatement(const std::string& query, const std::string& context = "") override;
+        bool RunPrepared(const std::string& query,
+                         const std::vector<omnisphere::types::SQLParam>& params,
                          const std::string& context = "") override;
 
         omnisphere::types::DataTable
-        FetchPrepared(const std::string &query,
-                      const std::vector<omnisphere::types::SQLParam> &params,
+        FetchPrepared(const std::string& query,
+                      const std::vector<omnisphere::types::SQLParam>& params,
                       const std::string& context = "") override;
         omnisphere::types::DataTable
-        FetchPrepared(const std::string &query,
-                      const std::vector<std::string> &params,
+        FetchPrepared(const std::string& query,
+                      const std::vector<std::string>& params,
                       const std::string& context = "") override;
-        omnisphere::types::DataTable FetchPrepared(const std::string &query,
-                                                   const std::string &param,
-                                                   const std::string& context = "") override;
-        omnisphere::types::DataTable FetchResults(const std::string &query, const std::string& context = "") override;
+        omnisphere::types::DataTable
+        FetchPrepared(const std::string& query,
+                      const std::string& param,
+                      const std::string& context = "") override;
+        omnisphere::types::DataTable FetchResults(const std::string& query,
+                                                  const std::string& context = "") override;
 
-        bool BeginTransaction() override;
-
+        bool BeginTransaction()  override;
         bool CommitTransaction() override;
         bool RollbackTransaction() override;
     };

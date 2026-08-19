@@ -73,7 +73,7 @@ namespace omnisphere::types
                        if constexpr (std::is_same_v<T, std::monostate>)
                        val = "NULL";
                        else if constexpr (std::is_same_v<T, bool>)
-                       val = (arg ? "'Y'" : "'N'");
+                       val = (arg ? "true" : "false"); // native bool — no Y/N
                        else if constexpr (std::is_same_v<T, int>)
                        val = std::to_string(arg);
                        else if constexpr (std::is_same_v<T, double>)
