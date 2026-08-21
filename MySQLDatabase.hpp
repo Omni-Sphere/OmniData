@@ -5,10 +5,6 @@
 #include <string>
 #include <vector>
 
-#ifndef my_bool
-using my_bool = bool;
-#endif
-
 namespace omnisphere::data
 {
     class MySQLDatabase : public IDatabase
