@@ -137,8 +137,14 @@ else() # Linux
     find_package(ODBC REQUIRED)
     find_library(SODIUM_LIB sodium REQUIRED)
     find_package(Boost REQUIRED COMPONENTS json)
-    # Arch Linux: sudo pacman -S libpqxx
-    find_package(libpqxx REQUIRED)
+
+    find_package(libpqxx QUIET)
+    if(NOT TARGET libpqxx::pqxx)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(libpqxx REQUIRED IMPORTED_TARGET libpqxx)
+        add_library(libpqxx::pqxx ALIAS PkgConfig::libpqxx)
+    endif()
+
     find_library(MYSQLCLIENT_LIB
         NAMES mysqlclient libmysqlclient mariadb
         HINTS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib /usr/lib64
