@@ -25,8 +25,8 @@ include(GNUInstallDirs)
 
 if(EXISTS "${OMNI_BASE_DIR}")
     list(APPEND CMAKE_PREFIX_PATH "${OMNI_BASE_DIR}")
-    # Aseguramos que encuentre los Config.cmake de OmniUtils en su nueva ruta
-    list(APPEND CMAKE_PREFIX_PATH "${OMNI_BASE_DIR}/lib/OmniUtils/cmake/OmniUtils")
+    list(APPEND CMAKE_PREFIX_PATH "${OMNI_BASE_DIR}/lib/cmake/OmniUtils")
+    list(APPEND CMAKE_PREFIX_PATH "${OMNI_BASE_DIR}/lib/OmniSphere/cmake/OmniUtils")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -64,15 +64,7 @@ if(NOT TARGET OmniUtils::OmniUtils)
     find_package(OmniUtils REQUIRED)
 endif()
 
-# --- Corrección limpia de rutas para OmniUtils importado ---
-if(TARGET OmniUtils::OmniUtils)
-    get_target_property(IS_IMPORTED OmniUtils::OmniUtils IMPORTED)
-    if(IS_IMPORTED)
-        set_target_properties(OmniUtils::OmniUtils PROPERTIES
-            INTERFACE_INCLUDE_DIRECTORIES "${OMNI_BASE_DIR}/include"
-        )
-    endif()
-endif()
+
 
 # --- Dependencias por plataforma ---
 # ODBC se mantiene SOLO para SQLServerDatabase.
