@@ -7,20 +7,17 @@ get_filename_component(PROYECTOS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
 # --- Configuración inteligente para compilación manual ---
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set(CMAKE_INSTALL_PREFIX "/usr/lib/OmniSphere" CACHE PATH "Directorio de instalación" FORCE)
+        set(CMAKE_INSTALL_PREFIX "/usr/local" CACHE PATH "Directorio de instalación" FORCE)
     else()
         set(CMAKE_INSTALL_PREFIX "${PROYECTOS_ROOT}/.omni-dev-sdk" CACHE PATH "Directorio de instalación" FORCE)
     endif()
 endif()
 
-# Forzar la subcarpeta para aislar los headers (ej. include/OmniData)
-set(CMAKE_INSTALL_INCLUDEDIR "include/${PROJECT_NAME}" CACHE PATH "Directorio de cabeceras" FORCE)
-
 include(GNUInstallDirs)
 
 # --- 1. Resolución de Rutas de las OmniLibs ---
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(OMNI_BASE_DIR "/usr/lib/OmniSphere")
+    set(OMNI_BASE_DIR "/usr/local")
 else()
     set(OMNI_BASE_DIR "${PROYECTOS_ROOT}/.omni-dev-sdk")
 endif()
@@ -230,7 +227,7 @@ install(TARGETS OmniData
 )
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
     FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
     PATTERN "build" EXCLUDE
     PATTERN ".git" EXCLUDE
