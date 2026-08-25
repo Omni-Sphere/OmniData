@@ -57,6 +57,27 @@ namespace omnisphere::types
 
         if (it == values.end())
         {
+            for (auto iter = values.begin(); iter != values.end(); ++iter)
+            {
+                if (iter->first.size() == column.size())
+                {
+                    bool match = true;
+                    for (size_t i = 0; i < column.size(); ++i)
+                    {
+                        if (std::tolower(static_cast<unsigned char>(iter->first[i])) !=
+                            std::tolower(static_cast<unsigned char>(column[i])))
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match)
+                    {
+                        return ValueProxy(&iter->second);
+                    }
+                }
+            }
+
             throw std::runtime_error("DataTable: Column '" + column +
                                      "' not found in row");
         }
@@ -72,6 +93,27 @@ namespace omnisphere::types
 
         if (it == values.end())
         {
+            for (auto iter = values.begin(); iter != values.end(); ++iter)
+            {
+                if (iter->first.size() == column.size())
+                {
+                    bool match = true;
+                    for (size_t i = 0; i < column.size(); ++i)
+                    {
+                        if (std::tolower(static_cast<unsigned char>(iter->first[i])) !=
+                            std::tolower(static_cast<unsigned char>(column[i])))
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match)
+                    {
+                        return iter->second;
+                    }
+                }
+            }
+
             throw std::runtime_error("DataTable: Column '" + column +
                                      "' not found in row");
         }
