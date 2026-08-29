@@ -339,8 +339,7 @@ namespace omnisphere::data
     bool PostgreSQLDatabase::CommitTransaction()
     {
         if (!_activeTxn)
-            throw std::runtime_error(
-                "[PostgreSQLDatabase::CommitTransaction] No active transaction.");
+            return false;
 
         _activeTxn->commit(); // sends COMMIT
         _activeTxn.reset();
@@ -350,12 +349,11 @@ namespace omnisphere::data
     bool PostgreSQLDatabase::RollbackTransaction()
     {
         if (!_activeTxn)
-            throw std::runtime_error(
-                "[PostgreSQLDatabase::RollbackTransaction] No active transaction.");
+            return false;
 
-        // pqxx::work destructor sends ROLLBACK automatically,
-        // but calling abort() is more explicit.
-        _activeTxn->abort();
+        try {
+            _activeTxn->abort();
+        } catch (...) {}
         _activeTxn.reset();
         return true;
     }
