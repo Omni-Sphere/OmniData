@@ -1,3 +1,4 @@
+#pragma once
 #include "SQLParams.hpp"
 #include <boost/describe.hpp>
 #include <boost/mp11.hpp>
@@ -5,9 +6,83 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <unordered_map>
+#include <algorithm>
+#include <cctype>
 
 namespace omnisphere::types
 {
+    template <typename T>
+    struct is_vector : std::false_type {};
+
+    template <typename U>
+    struct is_vector<std::vector<U>> : std::true_type {};
+
+    template <typename Model>
+    inline std::vector<std::string> FilterModelFields(const std::vector<std::string>& requestedFields)
+    {
+        std::unordered_map<std::string, std::string> modelColumns;
+        std::vector<std::string> defaultColumns;
+
+        boost::mp11::mp_for_each<boost::describe::describe_members<Model, boost::describe::mod_public>>(
+            [&](auto D) {
+                std::string rawName = D.name;
+
+                using FieldType = std::remove_cvref_t<decltype(std::declval<Model>().*D.pointer)>;
+
+                if constexpr (is_vector<FieldType>::value) {
+                    return;
+                }
+
+                std::string pascalName = rawName;
+                if (!pascalName.empty() && std::islower(static_cast<unsigned char>(pascalName[0]))) {
+                    pascalName[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(pascalName[0])));
+                }
+
+                std::string lowerKey = rawName;
+                std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(), ::tolower);
+
+                std::string formattedCol = "\"" + pascalName + "\"";
+                modelColumns[lowerKey] = formattedCol;
+                defaultColumns.push_back(formattedCol);
+            }
+        );
+
+        if (requestedFields.empty())
+        {
+            return defaultColumns;
+        }
+
+        std::vector<std::string> filtered;
+        filtered.reserve(requestedFields.size());
+
+        auto stripQuotesAndLower = [](const std::string& s) -> std::string {
+            std::string res = s;
+            if (res.size() >= 2 && res.front() == '"' && res.back() == '"') {
+                res = res.substr(1, res.size() - 2);
+            }
+            std::transform(res.begin(), res.end(), res.begin(), ::tolower);
+            return res;
+        };
+
+        for (const auto& req : requestedFields)
+        {
+            std::string cleanKey = stripQuotesAndLower(req);
+            auto it = modelColumns.find(cleanKey);
+            if (it != modelColumns.end())
+            {
+                filtered.push_back(it->second);
+            }
+        }
+
+        if (filtered.empty())
+        {
+            return defaultColumns;
+        }
+
+        return filtered;
+    }
+
     struct ColumnValue {
         std::string Column;
         SQLParam Value;
@@ -111,12 +186,20 @@ namespace omnisphere::types
                         }
                     }
 
+                    if (!colName.empty() && colName.front() != '"' && colName.find('(') == std::string::npos && colName.find(' ') == std::string::npos) {
+                        colName = "\"" + colName + "\"";
+                    }
+
                     parts.SelectClause += tableAlias + "." + colName + " AS " + objName + "_" + fieldName;
                 } else {
+                    std::string f = fields[i];
+                    if (!f.empty() && f.front() != '"' && f.find('(') == std::string::npos && f.find(' ') == std::string::npos && f != "*") {
+                        f = "\"" + f + "\"";
+                    }
                     if (!rootTableAlias.empty()) {
-                        parts.SelectClause += rootTableAlias + "." + fields[i];
+                        parts.SelectClause += rootTableAlias + "." + f;
                     } else {
-                        parts.SelectClause += fields[i];
+                        parts.SelectClause += f;
                     }
                 }
             }
@@ -301,7 +384,12 @@ namespace omnisphere::types
             result.Parameters.push_back(col.Value);
         }
 
-        result.Query = BuildUpdateQuery(tableName, setCols, "[" + whereField + "] = ?");
+        std::string formattedWhere = whereField;
+        if (!formattedWhere.empty() && formattedWhere.front() != '"' && formattedWhere.front() != '[')
+        {
+            formattedWhere = "\"" + formattedWhere + "\"";
+        }
+        result.Query = BuildUpdateQuery(tableName, setCols, formattedWhere + " = ?");
         result.Parameters.push_back(whereValue);
 
         return result;

@@ -194,6 +194,7 @@ set(PUBLIC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/DatabasePool.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/DataTable.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/SQLParams.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/QueryBuilder.hpp
 )
 
 foreach(HDR ${PUBLIC_HEADERS})
