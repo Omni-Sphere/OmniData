@@ -33,6 +33,10 @@ namespace omnisphere::types
     { return SQLParam
         {val}; }
 
+    inline SQLParam MakeSQLParam(const char *val)
+    { return SQLParam
+        {val ? std::string(val) : std::string("")}; }
+
     inline SQLParam MakeSQLParam(const std::vector<uint8_t> &val)
     {
         return SQLParam

@@ -1,5 +1,6 @@
 #pragma once
 #include "SQLParams.hpp"
+#include "DataMapper.hpp"
 #include <boost/describe.hpp>
 #include <boost/mp11.hpp>
 #include <optional>
@@ -321,12 +322,18 @@ namespace omnisphere::types
     inline InsertQueryResult BuildInsertQuery(const std::string& tableName, int entry, const DTO& dto)
     {
         InsertQueryResult result;
-        std::vector<std::string> cols = {"Entry"};
-        result.Parameters.push_back(MakeSQLParam(entry));
+        std::vector<std::string> cols;
+
+        if (entry > 0)
+        {
+            cols.push_back("\"Entry\"");
+            result.Parameters.push_back(MakeSQLParam(entry));
+        }
 
         boost::mp11::mp_for_each<boost::describe::describe_members<DTO, boost::describe::mod_public>>(
             [&](auto PropertyDescriptor) {
-                std::string colName = PropertyDescriptor.name;
+                std::string rawColName = PropertyDescriptor.name;
+                std::string colName = (rawColName.front() == '"' && rawColName.back() == '"') ? rawColName : ("\"" + rawColName + "\"");
                 const auto& fieldVal = dto.*PropertyDescriptor.pointer;
                 using FieldType = std::remove_cvref_t<decltype(fieldVal)>;
 
