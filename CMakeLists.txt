@@ -56,6 +56,7 @@ add_library(OmniData::OmniData ALIAS OmniData)
 target_include_directories(OmniData
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${OMNI_BASE_DIR}/include/OmniSphere>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
