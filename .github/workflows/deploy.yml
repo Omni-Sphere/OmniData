@@ -1,0 +1,77 @@
+name: CD - OmniSphere SDK (Data Library)
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: omnisphere-sdk-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy-sdk:
+    name: Rebuild SDK Base & Deploy API (main)
+    runs-on: ubuntu-latest
+    env:
+      SSH_KEY_VAL: ${{ secrets.SSH_KEY }}
+      SSH_PASS_VAL: ${{ secrets.SSH_PASSWORD }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Rebuild SDK Base Image & Deploy via SSH (Key Auth)
+        if: ${{ env.SSH_KEY_VAL != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT || '2202' }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: &deploy_script |
+            set -e
+
+            echo "=================================================="
+            echo " Rebuilding SDK Base Image for Branch: main"
+            echo "=================================================="
+
+            cd /home/arodriguez/Proyectos
+
+            echo "--> Pulling latest changes in all SDK library repositories..."
+            for d in OmniUtils OmniData OmniCore OmniERP OmniRoute OmniGraph; do
+              if [ -d "$d/.git" ]; then
+                (cd "$d" && git checkout main && git pull origin main) || true
+              fi
+            done
+
+            echo "=================================================="
+            echo " 1. Rebuilding Base SDK Image (localhost/omnisphere-sdk:latest)"
+            echo "=================================================="
+            podman build -t localhost/omnisphere-sdk:latest -f Dockerfile .
+            podman tag localhost/omnisphere-sdk:latest omnisphere-sdk:latest || true
+
+            echo "=================================================="
+            echo " 2. Rebuilding OmniRouteAPI Image (omniroute-api-dev)"
+            echo "=================================================="
+            (cd /home/arodriguez/Proyectos/OmniRouteAPI && podman build -t omniroute-api-dev -f Dockerfile .)
+
+            echo "=================================================="
+            echo " 3. Restarting Container (omniroute-api-dev) & Nginx Proxy"
+            echo "=================================================="
+            (podman restart omniroute-api-dev || podman restart omniroute-api-prod || podman pod restart --all)
+            (podman restart nginx-proxy || podman restart nginx || true)
+
+            echo "=================================================="
+            echo " SDK & OmniRouteAPI Deployment Complete!"
+            echo "=================================================="
+
+      - name: Rebuild SDK Base Image & Deploy via SSH (Password Auth)
+        if: ${{ env.SSH_KEY_VAL == '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT || '2202' }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: *deploy_script
