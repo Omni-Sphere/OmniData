@@ -59,8 +59,17 @@ jobs:
             echo "=================================================="
             echo " 3. Restarting Container (omniroute-api-dev) & Nginx Proxy"
             echo "=================================================="
-            (podman restart omniroute-api-dev || podman restart omniroute-api-prod || podman pod restart --all)
-            (podman restart nginx-proxy || podman restart nginx || true)
+            (podman restart omniroute-api-dev || podman restart omniroute-api-prod || true)
+            (podman restart nginx-proxy || podman run -d \
+              --name nginx-proxy \
+              --network omnisphere-dev-net \
+              --restart always \
+              -p 80:80 \
+              -p 443:443 \
+              -v /home/arodriguez/Proyectos/nginx.conf:/etc/nginx/nginx.conf:ro,Z \
+              -v /home/arodriguez/Proyectos/podman-proxy/certbot/conf:/etc/letsencrypt:ro,Z \
+              -v /home/arodriguez/Proyectos/podman-proxy/certbot/www:/var/www/certbot:ro,Z \
+              docker.io/library/nginx:alpine || true)
 
             echo "=================================================="
             echo " SDK & OmniRouteAPI Deployment Complete!"
