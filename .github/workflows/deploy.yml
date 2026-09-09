@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - master
 
 concurrency:
   group: omnisphere-sdk-deploy
@@ -13,23 +14,19 @@ jobs:
   deploy-sdk:
     name: Rebuild SDK Base & Deploy API (main)
     runs-on: ubuntu-latest
-    env:
-      SSH_KEY_VAL: ${{ secrets.SSH_KEY }}
-      SSH_PASS_VAL: ${{ secrets.SSH_PASSWORD }}
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Rebuild SDK Base Image & Deploy via SSH (Key Auth)
-        if: ${{ env.SSH_KEY_VAL != '' }}
+      - name: Rebuild SDK Base Image & Deploy via SSH (Key Auth Only)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           port: ${{ secrets.SSH_PORT || '2202' }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          script: &deploy_script |
+          script: |
             set -e
 
             echo "=================================================="
@@ -41,7 +38,7 @@ jobs:
             echo "--> Pulling latest changes in all SDK library repositories..."
             for d in OmniUtils OmniData OmniCore OmniERP OmniRoute OmniGraph; do
               if [ -d "$d/.git" ]; then
-                (cd "$d" && git checkout main && git pull origin main) || true
+                (cd "$d" && (git checkout main 2>/dev/null || git checkout master 2>/dev/null) && (git pull origin main 2>/dev/null || git pull origin master 2>/dev/null)) || true
               fi
             done
 
@@ -74,13 +71,3 @@ jobs:
             echo "=================================================="
             echo " SDK & OmniRouteAPI Deployment Complete!"
             echo "=================================================="
-
-      - name: Rebuild SDK Base Image & Deploy via SSH (Password Auth)
-        if: ${{ env.SSH_KEY_VAL == '' }}
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT || '2202' }}
-          username: ${{ secrets.SSH_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          script: *deploy_script
