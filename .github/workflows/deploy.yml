@@ -28,45 +28,144 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             set -e
+            TARGET_DIR="${{ secrets.TARGET_DIR || '/src' }}"
 
             echo "=================================================="
             echo " Rebuilding SDK Base Image for Branch: main"
+            echo " Target Directory: $TARGET_DIR"
             echo "=================================================="
 
-            cd /home/arodriguez/Proyectos
+            mkdir -p "$TARGET_DIR"
+            cd "$TARGET_DIR"
 
+            # 1. Asegurar Red de Podman
+            podman network exists omnisphere-test-net 2>/dev/null || podman network create omnisphere-test-net
+
+            # 2. Asegurar Base de Datos PostgreSQL 18
+            if ! podman container exists omniroute-db-dev 2>/dev/null; then
+              echo "--> Creando contenedor de Base de Datos PostgreSQL 18 (omniroute-db-dev)..."
+              mkdir -p "$TARGET_DIR/volumes/postgres_data"
+              podman run -d \
+                --name omniroute-db-dev \
+                --network omnisphere-test-net \
+                --restart always \
+                -e POSTGRES_DB=OmniRoute \
+                -e POSTGRES_USER=system \
+                -e POSTGRES_PASSWORD=Development.. \
+                -v "$TARGET_DIR/volumes/postgres_data:/var/lib/postgresql:Z" \
+                -p 5432:5432 \
+                docker.io/library/postgres:18-alpine
+            fi
+
+            SQL_CHANGED=false
             echo "--> Pulling latest changes in all SDK library repositories..."
+            if [ ! -d "$TARGET_DIR/cppgraphqlgen/.git" ]; then
+              echo "--> Clonando repositorio cppgraphqlgen..."
+              git clone "https://github.com/microsoft/cppgraphqlgen.git" "$TARGET_DIR/cppgraphqlgen" 2>/dev/null || true
+            else
+              cd "$TARGET_DIR/cppgraphqlgen" && git pull origin main 2>/dev/null || true
+            fi
+
             for d in OmniUtils OmniData OmniCore OmniERP OmniRoute OmniGraph; do
-              if [ -d "$d/.git" ]; then
-                (cd "$d" && (git checkout main 2>/dev/null || git checkout master 2>/dev/null) && (git pull origin main 2>/dev/null || git pull origin master 2>/dev/null)) || true
+              if [ ! -d "$TARGET_DIR/$d/.git" ]; then
+                echo "--> Clonando repositorio $d..."
+                git clone "https://github.com/Omni-Sphere/$d.git" "$TARGET_DIR/$d" 2>/dev/null || true
+              fi
+
+              if [ -d "$TARGET_DIR/$d/.git" ]; then
+                cd "$TARGET_DIR/$d"
+                PREV_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+                (git checkout main 2>/dev/null || git checkout master 2>/dev/null || true)
+                git pull origin $(git branch --show-current 2>/dev/null || echo "main") 2>/dev/null || true
+                NEW_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+
+                if [ "$d" == "OmniGraph" ] && [ -n "$PREV_HEAD" ] && [ -n "$NEW_HEAD" ] && [ "$PREV_HEAD" != "$NEW_HEAD" ]; then
+                  if git diff --name-only "$PREV_HEAD" "$NEW_HEAD" | grep -q "OmniRoute.sql"; then
+                    SQL_CHANGED=true
+                  fi
+                fi
               fi
             done
 
+            cd "$TARGET_DIR"
+
             echo "=================================================="
-            echo " 1. Rebuilding Base SDK Image (localhost/omnisphere-sdk:latest)"
+            echo " 3. Checking Database Schema Migrations (OmniRoute.sql)"
             echo "=================================================="
-            podman build -t localhost/omnisphere-sdk:latest -f Dockerfile .
+            SQL_FILE="$TARGET_DIR/OmniGraph/GraphQL/Route/OmniRoute.sql"
+            if [ "$SQL_CHANGED" = true ]; then
+              echo "--> Changes detected in OmniRoute.sql! Applying migration to omniroute-db-dev..."
+              if [ -f "$SQL_FILE" ] && podman container exists omniroute-db-dev 2>/dev/null; then
+                podman exec -i omniroute-db-dev psql -U system -d OmniRoute < "$SQL_FILE" || true
+              else
+                echo "--> Warning: SQL file or omniroute-db-dev container not found, skipping migration."
+              fi
+            else
+              echo "--> No changes detected in OmniRoute.sql. Skipping DB schema migration."
+            fi
+
+            echo "=================================================="
+            echo " 4. Rebuilding Base SDK Image (localhost/omnisphere-sdk:latest)"
+            echo "=================================================="
+            if [ -f "$TARGET_DIR/OmniCore/Dockerfile" ]; then
+              podman build -t localhost/omnisphere-sdk:latest -f "$TARGET_DIR/OmniCore/Dockerfile" "$TARGET_DIR"
+            elif [ -f "$TARGET_DIR/Dockerfile" ]; then
+              podman build -t localhost/omnisphere-sdk:latest -f "$TARGET_DIR/Dockerfile" "$TARGET_DIR"
+            else
+              echo "Error: Base SDK Dockerfile not found in $TARGET_DIR/OmniCore/Dockerfile or $TARGET_DIR/Dockerfile"
+              exit 1
+            fi
             podman tag localhost/omnisphere-sdk:latest omnisphere-sdk:latest || true
 
             echo "=================================================="
-            echo " 2. Rebuilding OmniRouteAPI Image (omniroute-api-dev)"
+            echo " 5. Rebuilding OmniRouteAPI Image (omniroute-api:test)"
             echo "=================================================="
-            (cd /home/arodriguez/Proyectos/OmniRouteAPI && podman build -t omniroute-api-dev -f Dockerfile .)
+            if [ ! -d "$TARGET_DIR/OmniRouteAPI/.git" ]; then
+              git clone https://github.com/Omni-Sphere/OmniRouteAPI.git "$TARGET_DIR/OmniRouteAPI" 2>/dev/null || true
+            fi
+
+            if [ -d "$TARGET_DIR/OmniRouteAPI" ]; then
+              cd "$TARGET_DIR/OmniRouteAPI"
+              git pull 2>/dev/null || true
+              if [ -f "Dockerfile.test" ]; then
+                podman build -t omniroute-api:test -f Dockerfile.test .
+              else
+                podman build -t omniroute-api:test -f Dockerfile .
+              fi
+              podman tag omniroute-api:test omniroute-api-dev:latest 2>/dev/null || true
+
+              if podman container exists omniroute-api 2>/dev/null; then
+                podman stop omniroute-api || true
+                podman rm omniroute-api || true
+              fi
+
+              mkdir -p "$TARGET_DIR/uploads"
+              podman run -d \
+                --name omniroute-api \
+                --network omnisphere-test-net \
+                --restart always \
+                -p 8080:8080 -p 8081:8081 \
+                -v "$TARGET_DIR/uploads:/app/uploads:Z" \
+                omniroute-api:test
+            fi
 
             echo "=================================================="
-            echo " 3. Restarting Container (omniroute-api-dev) & Nginx Proxy"
+            echo " 6. Restarting/Deploying Nginx Proxy"
             echo "=================================================="
-            (podman restart omniroute-api-dev || podman restart omniroute-api-prod || true)
-            (podman restart nginx-proxy || podman run -d \
-              --name nginx-proxy \
-              --network omnisphere-dev-net \
-              --restart always \
-              -p 80:80 \
-              -p 443:443 \
-              -v /home/arodriguez/Proyectos/nginx.conf:/etc/nginx/nginx.conf:ro,Z \
-              -v /home/arodriguez/Proyectos/podman-proxy/certbot/conf:/etc/letsencrypt:ro,Z \
-              -v /home/arodriguez/Proyectos/podman-proxy/certbot/www:/var/www/certbot:ro,Z \
-              docker.io/library/nginx:alpine || true)
+            mkdir -p "$TARGET_DIR/podman-proxy/certbot/conf" "$TARGET_DIR/podman-proxy/certbot/www"
+            if ! podman container exists nginx-proxy 2>/dev/null; then
+              podman run -d \
+                --name nginx-proxy \
+                --network omnisphere-test-net \
+                --restart always \
+                -p 80:80 -p 443:443 \
+                -v "$TARGET_DIR/OmniRouteWeb/nginx.conf:/etc/nginx/nginx.conf:ro,Z" \
+                -v "$TARGET_DIR/podman-proxy/certbot/conf:/etc/letsencrypt:ro,Z" \
+                -v "$TARGET_DIR/podman-proxy/certbot/www:/var/www/certbot:ro,Z" \
+                docker.io/library/nginx:alpine
+            else
+              podman restart nginx-proxy
+            fi
 
             echo "=================================================="
             echo " SDK & OmniRouteAPI Deployment Complete!"
