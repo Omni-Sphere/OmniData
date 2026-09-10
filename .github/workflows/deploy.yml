@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+  workflow_dispatch:
 
 concurrency:
   group: omnisphere-sdk-deploy
@@ -81,9 +82,3 @@ jobs:
             echo " Base SDK Rebuild Complete!"
             echo "=================================================="
 
-      - name: Trigger OmniRouteAPI Workflow
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
-          repository: Omni-Sphere/OmniRouteAPI
-          event-type: sdk-updated
