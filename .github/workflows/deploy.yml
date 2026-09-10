@@ -38,10 +38,10 @@ jobs:
             cd "$TARGET_DIR"
 
             if [ ! -d "$TARGET_DIR/cppgraphqlgen/.git" ]; then
-              echo "--> Clonando cppgraphqlgen..."
-              git clone "https://github.com/microsoft/cppgraphqlgen.git" "$TARGET_DIR/cppgraphqlgen" 2>/dev/null || true
+              echo "--> Clonando cppgraphqlgen (con submódulos)..."
+              git clone --recursive "https://github.com/microsoft/cppgraphqlgen.git" "$TARGET_DIR/cppgraphqlgen" 2>/dev/null || true
             else
-              (cd "$TARGET_DIR/cppgraphqlgen" && git pull origin main 2>/dev/null || true)
+              (cd "$TARGET_DIR/cppgraphqlgen" && git pull origin main 2>/dev/null && git submodule update --init --recursive 2>/dev/null || true)
             fi
 
             for d in OmniUtils OmniData OmniCore OmniERP OmniRoute OmniGraph OmniRouteAPI OmniRouteWeb; do
