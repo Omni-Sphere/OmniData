@@ -26,6 +26,7 @@ jobs:
           port: ${{ secrets.SSH_PORT || '2202' }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          command_timeout: 30m
           script: |
             set -e
             TARGET_DIR="${{ secrets.TARGET_DIR || '/src' }}"
