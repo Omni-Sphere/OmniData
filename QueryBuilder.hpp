@@ -109,7 +109,12 @@ namespace omnisphere::types
         std::vector<ColumnValue> cols;
         boost::mp11::mp_for_each<boost::describe::describe_members<DTO, boost::describe::mod_public>>(
             [&](auto PropertyDescriptor) {
-                std::string colName = PropertyDescriptor.name;
+                // Envolver el nombre del campo en comillas dobles para PostgreSQL (case-sensitive)
+                std::string rawName = PropertyDescriptor.name;
+                std::string colName = (rawName.front() == '"' && rawName.back() == '"')
+                    ? rawName
+                    : ("\"" + rawName + "\"");
+
                 const auto& fieldVal = dto.*PropertyDescriptor.pointer;
                 using FieldType = std::remove_cvref_t<decltype(fieldVal)>;
 
