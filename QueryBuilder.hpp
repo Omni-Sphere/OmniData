@@ -109,11 +109,14 @@ namespace omnisphere::types
         std::vector<ColumnValue> cols;
         boost::mp11::mp_for_each<boost::describe::describe_members<DTO, boost::describe::mod_public>>(
             [&](auto PropertyDescriptor) {
-                // Envolver el nombre del campo en comillas dobles para PostgreSQL (case-sensitive)
                 std::string rawName = PropertyDescriptor.name;
-                std::string colName = (rawName.front() == '"' && rawName.back() == '"')
-                    ? rawName
-                    : ("\"" + rawName + "\"");
+                std::string pascalName = rawName;
+                if (!pascalName.empty() && std::islower(static_cast<unsigned char>(pascalName[0]))) {
+                    pascalName[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(pascalName[0])));
+                }
+                std::string colName = (pascalName.front() == '"' && pascalName.back() == '"')
+                    ? pascalName
+                    : ("\"" + pascalName + "\"");
 
                 const auto& fieldVal = dto.*PropertyDescriptor.pointer;
                 using FieldType = std::remove_cvref_t<decltype(fieldVal)>;
@@ -338,7 +341,11 @@ namespace omnisphere::types
         boost::mp11::mp_for_each<boost::describe::describe_members<DTO, boost::describe::mod_public>>(
             [&](auto PropertyDescriptor) {
                 std::string rawColName = PropertyDescriptor.name;
-                std::string colName = (rawColName.front() == '"' && rawColName.back() == '"') ? rawColName : ("\"" + rawColName + "\"");
+                std::string pascalName = rawColName;
+                if (!pascalName.empty() && std::islower(static_cast<unsigned char>(pascalName[0]))) {
+                    pascalName[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(pascalName[0])));
+                }
+                std::string colName = (pascalName.front() == '"' && pascalName.back() == '"') ? pascalName : ("\"" + pascalName + "\"");
                 const auto& fieldVal = dto.*PropertyDescriptor.pointer;
                 using FieldType = std::remove_cvref_t<decltype(fieldVal)>;
 

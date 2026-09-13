@@ -25,6 +25,11 @@ namespace omnisphere::types
         {std::monostate{}};
     }
 
+    inline SQLParam MakeSQLParam(std::nullptr_t)
+    {
+        return SQLParam{std::monostate{}};
+    }
+
     inline SQLParam MakeSQLParam(int val)
     { return SQLParam
         {val}; }
