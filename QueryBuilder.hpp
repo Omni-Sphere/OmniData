@@ -19,17 +19,14 @@ namespace omnisphere::types
     template <typename U>
     struct is_vector<std::vector<U>> : std::true_type {};
 
-    template <typename Model>
-    inline std::vector<std::string> FilterModelFields(const std::vector<std::string>& requestedFields)
+    template <typename T>
+    inline void CollectModelMembers(std::unordered_map<std::string, std::string>& modelColumns, std::vector<std::string>& defaultColumns)
     {
-        std::unordered_map<std::string, std::string> modelColumns;
-        std::vector<std::string> defaultColumns;
-
-        boost::mp11::mp_for_each<boost::describe::describe_members<Model, boost::describe::mod_public>>(
+        boost::mp11::mp_for_each<boost::describe::describe_members<T, boost::describe::mod_public>>(
             [&](auto D) {
                 std::string rawName = D.name;
 
-                using FieldType = std::remove_cvref_t<decltype(std::declval<Model>().*D.pointer)>;
+                using FieldType = std::remove_cvref_t<decltype(std::declval<T>().*D.pointer)>;
 
                 if constexpr (is_vector<FieldType>::value) {
                     return;
@@ -48,6 +45,22 @@ namespace omnisphere::types
                 defaultColumns.push_back(formattedCol);
             }
         );
+
+        boost::mp11::mp_for_each<boost::describe::describe_bases<T, boost::describe::mod_any_access>>(
+            [&](auto BaseDescriptor) {
+                using BaseType = typename decltype(BaseDescriptor)::type;
+                CollectModelMembers<BaseType>(modelColumns, defaultColumns);
+            }
+        );
+    }
+
+    template <typename Model>
+    inline std::vector<std::string> FilterModelFields(const std::vector<std::string>& requestedFields)
+    {
+        std::unordered_map<std::string, std::string> modelColumns;
+        std::vector<std::string> defaultColumns;
+
+        CollectModelMembers<Model>(modelColumns, defaultColumns);
 
         if (requestedFields.empty())
         {

@@ -12,6 +12,9 @@ namespace omnisphere::data {
 template<typename T> struct is_optional : std::false_type {};
 template<typename T> struct is_optional<std::optional<T>> : std::true_type {};
 
+template<typename T> struct is_vector : std::false_type {};
+template<typename U> struct is_vector<std::vector<U>> : std::true_type {};
+
 template<typename T> struct extract_optional { using type = T; };
 template<typename T> struct extract_optional<std::optional<T>> { using type = T; };
 
@@ -36,7 +39,9 @@ void MapMembersRecursive(T& item, omnisphere::types::DataTable::Row& row, const 
 
             if (!targetCol.empty()) {
                 using FieldType = std::remove_reference_t<decltype(item.*PropertyDescriptor.pointer)>;
-                if constexpr (is_optional<FieldType>::value) {
+                if constexpr (is_vector<FieldType>::value) {
+                    return;
+                } else if constexpr (is_optional<FieldType>::value) {
                     using Underlying = typename extract_optional<FieldType>::type;
                     item.*PropertyDescriptor.pointer = row[targetCol].template GetOptional<Underlying>();
                 } else {
