@@ -231,7 +231,7 @@ namespace omnisphere::types
         {
             if (i > 0) parts.WhereClause += " AND ";
             
-            if (conditions[i].Entity.empty()) {
+            if (conditions[i].Entity.empty() || conditions[i].Entity == "AND" || conditions[i].Entity == "OR") {
                 if (!rootTableAlias.empty()) {
                     parts.WhereClause += rootTableAlias + "." + conditions[i].Field + " " + conditions[i].Operator + " " + conditions[i].Value;
                 } else {
