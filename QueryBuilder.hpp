@@ -8,6 +8,7 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <cctype>
 
@@ -117,12 +118,29 @@ namespace omnisphere::types
     }
 
     template <class DTO>
-    inline std::vector<ColumnValue> ExtractUpdateColumns(const DTO& dto)
+    inline std::vector<ColumnValue> ExtractUpdateColumns(const DTO& dto, const std::vector<std::string>& mutationFields = {})
     {
         std::vector<ColumnValue> cols;
+        std::unordered_set<std::string> allowed;
+        for (const auto& f : mutationFields) {
+            std::string c = f;
+            if (c.size() >= 2 && c.front() == '"' && c.back() == '"') c = c.substr(1, c.size() - 2);
+            std::transform(c.begin(), c.end(), c.begin(), ::tolower);
+            allowed.insert(c);
+        }
+
         boost::mp11::mp_for_each<boost::describe::describe_members<DTO, boost::describe::mod_public>>(
             [&](auto PropertyDescriptor) {
                 std::string rawName = PropertyDescriptor.name;
+                std::string lowerName = rawName;
+                std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+
+                bool isAuditField = (lowerName == "lastupdatedby" || lowerName == "updatedby" || lowerName == "updatedate");
+
+                if (!allowed.empty() && !allowed.count(lowerName) && !isAuditField) {
+                    return;
+                }
+
                 std::string pascalName = rawName;
                 if (!pascalName.empty() && std::islower(static_cast<unsigned char>(pascalName[0]))) {
                     pascalName[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(pascalName[0])));
@@ -340,7 +358,7 @@ namespace omnisphere::types
     };
 
     template <class DTO>
-    inline InsertQueryResult BuildInsertQuery(const std::string& tableName, int entry, const DTO& dto)
+    inline InsertQueryResult BuildInsertQuery(const std::string& tableName, int entry, const DTO& dto, const std::vector<std::string>& mutationFields = {})
     {
         InsertQueryResult result;
         std::vector<std::string> cols;
@@ -351,9 +369,26 @@ namespace omnisphere::types
             result.Parameters.push_back(MakeSQLParam(entry));
         }
 
+        std::unordered_set<std::string> allowed;
+        for (const auto& f : mutationFields) {
+            std::string c = f;
+            if (c.size() >= 2 && c.front() == '"' && c.back() == '"') c = c.substr(1, c.size() - 2);
+            std::transform(c.begin(), c.end(), c.begin(), ::tolower);
+            allowed.insert(c);
+        }
+
         boost::mp11::mp_for_each<boost::describe::describe_members<DTO, boost::describe::mod_public>>(
             [&](auto PropertyDescriptor) {
                 std::string rawColName = PropertyDescriptor.name;
+                std::string lowerName = rawColName;
+                std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+
+                bool isAuditField = (lowerName == "createdby" || lowerName == "createdate");
+
+                if (!allowed.empty() && !allowed.count(lowerName) && !isAuditField) {
+                    return;
+                }
+
                 std::string pascalName = rawColName;
                 if (!pascalName.empty() && std::islower(static_cast<unsigned char>(pascalName[0]))) {
                     pascalName[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(pascalName[0])));
@@ -368,6 +403,11 @@ namespace omnisphere::types
                         result.Parameters.push_back(MakeSQLParam(fieldVal.value()));
                     }
                 } else {
+                    if constexpr (std::is_same_v<FieldType, std::string>) {
+                        if (fieldVal.empty() && (lowerName == "createdate" || lowerName == "updatedate")) {
+                            return;
+                        }
+                    }
                     cols.push_back(colName);
                     result.Parameters.push_back(MakeSQLParam(fieldVal));
                 }
