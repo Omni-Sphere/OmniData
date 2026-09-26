@@ -383,9 +383,9 @@ namespace omnisphere::types
                 std::string lowerName = rawColName;
                 std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
 
-                bool isAuditField = (lowerName == "createdby" || lowerName == "createdate");
+                bool isSystemOrAuditField = (lowerName == "createdby" || lowerName == "createdate" || lowerName == "code");
 
-                if (!allowed.empty() && !allowed.count(lowerName) && !isAuditField) {
+                if (!allowed.empty() && !allowed.count(lowerName) && !isSystemOrAuditField) {
                     return;
                 }
 
@@ -399,12 +399,17 @@ namespace omnisphere::types
 
                 if constexpr (is_optional<FieldType>::value) {
                     if (fieldVal.has_value()) {
+                        if constexpr (std::is_same_v<typename FieldType::value_type, std::string>) {
+                            if (fieldVal.value().empty() && lowerName == "code") {
+                                return;
+                            }
+                        }
                         cols.push_back(colName);
                         result.Parameters.push_back(MakeSQLParam(fieldVal.value()));
                     }
                 } else {
                     if constexpr (std::is_same_v<FieldType, std::string>) {
-                        if (fieldVal.empty() && (lowerName == "createdate" || lowerName == "updatedate")) {
+                        if (fieldVal.empty() && (lowerName == "createdate" || lowerName == "updatedate" || lowerName == "code")) {
                             return;
                         }
                     }
