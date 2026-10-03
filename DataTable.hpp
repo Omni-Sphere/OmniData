@@ -17,6 +17,22 @@
 
 namespace omnisphere::types
 {
+    template <typename T, typename = void>
+    struct EnumConverter
+    {
+        static T FromString(const std::string &s)
+        {
+            try
+            {
+                return static_cast<T>(std::stoi(s));
+            }
+            catch (...)
+            {
+                return static_cast<T>(-1);
+            }
+        }
+    };
+
     class DataTable
     {
         public:
@@ -31,7 +47,7 @@ namespace omnisphere::types
             {
                 public:
                 explicit ValueProxy(
-                    Value *valuePtr
+                    const Value *valuePtr
                 )
                     : valuePtr_(
                         valuePtr
@@ -77,48 +93,67 @@ namespace omnisphere::types
                     if (IsNull())
                         return std::nullopt;
 
-                    if (const T *val = std::get_if<T>(&valuePtr_->value()))
-                        return *val;
-
                     const Row::Data &v = valuePtr_->value();
 
-                    if constexpr (std::is_same_v<T, double>)
+                    if constexpr (std::is_enum_v<T>)
                     {
                         if (const int *ival = std::get_if<int>(&v))
-                            return static_cast<double>(*ival);
-                        if (const std::string *sval = std::get_if<std::string>(&v))
-                        {
-                            try
-                            {
-                                return std::stod(*sval);
-                            }
-                            catch (...)
-                            {
-                                return std::nullopt;
-                            }
-                        }
-                    }
-                    else if constexpr (std::is_same_v<T, int>)
-                    {
+                            return static_cast<T>(*ival);
                         if (const double *dval = std::get_if<double>(&v))
-                            return static_cast<int>(*dval);
+                            return static_cast<T>(static_cast<int>(*dval));
                         if (const std::string *sval = std::get_if<std::string>(&v))
                         {
                             try
                             {
-                                return std::stoi(*sval);
+                                return EnumConverter<T>::FromString(*sval);
                             }
                             catch (...)
                             {
                                 return std::nullopt;
                             }
                         }
+                        return std::nullopt;
                     }
+                    else
+                    {
+                        if (const T *val = std::get_if<T>(&v))
+                            return *val;
 
-                    throw std::runtime_error("DataTable: Cannot convert actual type '" +
-                                             GetTypeName(v) +
-                                             "' to requested optional type '" +
-                                             Demangle(typeid(T).name()) + "'");
+                        if constexpr (std::is_same_v<T, double>)
+                        {
+                            if (const int *ival = std::get_if<int>(&v))
+                                return static_cast<double>(*ival);
+                            if (const std::string *sval = std::get_if<std::string>(&v))
+                            {
+                                try
+                                {
+                                    return std::stod(*sval);
+                                }
+                                catch (...)
+                                {
+                                    return std::nullopt;
+                                }
+                            }
+                        }
+                        else if constexpr (std::is_same_v<T, int>)
+                        {
+                            if (const double *dval = std::get_if<double>(&v))
+                                return static_cast<int>(*dval);
+                            if (const std::string *sval = std::get_if<std::string>(&v))
+                            {
+                                try
+                                {
+                                    return std::stoi(*sval);
+                                }
+                                catch (...)
+                                {
+                                    return std::nullopt;
+                                }
+                            }
+                        }
+
+                        return std::nullopt;
+                    }
                 }
 
                 template <typename T> operator std::optional<T>() const
@@ -158,14 +193,7 @@ namespace omnisphere::types
 
                         if (const std::string *sval = std::get_if<std::string>(&v))
                         {
-                            try
-                            {
-                                return static_cast<T>(std::stoi(*sval));
-                            }
-                            catch (...)
-                            {
-                                return static_cast<T>(-1);
-                            }
+                            return EnumConverter<T>::FromString(*sval);
                         }
 
                         return static_cast<T>(-1);
@@ -254,13 +282,30 @@ namespace omnisphere::types
                 bool IsNull() const
                 { return !valuePtr_ || !valuePtr_->has_value(); }
 
+                bool has_value() const
+                { return !IsNull(); }
+
+                const Data &operator*() const
+                {
+                    if (IsNull())
+                        throw std::runtime_error("DataTable: Value is null");
+                    return valuePtr_->value();
+                }
+
+                const Data *operator->() const
+                {
+                    if (IsNull())
+                        throw std::runtime_error("DataTable: Value is null");
+                    return &valuePtr_->value();
+                }
+
                 private:
-                Value *valuePtr_;
+                const Value *valuePtr_;
             };
 
             void Set(const std::string &column, const Value &value);
             ValueProxy operator[](const std::string &column);
-            const Value &operator[](const std::string &column) const;
+            ValueProxy operator[](const std::string &column) const;
             bool HasColumn(const std::string &column) const;
 
             std::unordered_map<std::string, Value>::iterator begin()

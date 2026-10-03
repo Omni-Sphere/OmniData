@@ -85,7 +85,7 @@ namespace omnisphere::types
         return ValueProxy(&it->second);
     }
 
-    const DataTable::Row::Value &
+    DataTable::Row::ValueProxy
     DataTable::Row::operator[](const std::string &column) const
     {
         std::unordered_map<std::string, Value>::const_iterator it =
@@ -109,7 +109,7 @@ namespace omnisphere::types
                     }
                     if (match)
                     {
-                        return iter->second;
+                        return ValueProxy(&iter->second);
                     }
                 }
             }
@@ -118,7 +118,7 @@ namespace omnisphere::types
                                      "' not found in row");
         }
 
-        return it->second;
+        return ValueProxy(&it->second);
     }
 
     bool DataTable::Row::HasColumn(const std::string &column) const
