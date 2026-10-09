@@ -25,10 +25,11 @@ void MapMembersRecursive(T& item, omnisphere::types::DataTable::Row& row, const 
         [&](auto PropertyDescriptor) {
             std::string rawName = PropertyDescriptor.name;
             std::string columnName = prefix + rawName;
-            std::string pascalName = prefix + rawName;
-            if (!pascalName.empty() && std::islower(static_cast<unsigned char>(pascalName[0]))) {
-                pascalName[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(pascalName[0])));
+            std::string pascalProp = rawName;
+            if (!pascalProp.empty() && std::islower(static_cast<unsigned char>(pascalProp[0]))) {
+                pascalProp[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(pascalProp[0])));
             }
+            std::string pascalName = prefix + pascalProp;
 
             std::string targetCol;
             if (row.HasColumn(columnName)) {
