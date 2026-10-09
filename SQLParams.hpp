@@ -18,11 +18,9 @@ namespace omnisphere::types
     inline SQLParam MakeSQLParam(const std::optional<T> &opt)
     {
         if (opt.has_value())
-            return SQLParam
-        {*opt};
+            return MakeSQLParam(*opt);
         else
-            return SQLParam
-        {std::monostate{}};
+            return SQLParam{std::monostate{}};
     }
 
     inline SQLParam MakeSQLParam(std::nullptr_t)
