@@ -123,6 +123,27 @@ namespace omnisphere::types
 
     bool DataTable::Row::HasColumn(const std::string &column) const
     {
-        return values.find(column) != values.end();
+        if (values.find(column) != values.end())
+            return true;
+
+        for (const auto &pair : values)
+        {
+            if (pair.first.size() == column.size())
+            {
+                bool match = true;
+                for (size_t i = 0; i < column.size(); ++i)
+                {
+                    if (std::tolower(static_cast<unsigned char>(pair.first[i])) !=
+                        std::tolower(static_cast<unsigned char>(column[i])))
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match)
+                    return true;
+            }
+        }
+        return false;
     }
 } // namespace omnisphere::types
