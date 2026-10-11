@@ -383,7 +383,7 @@ namespace omnisphere::types
                 std::string lowerName = rawColName;
                 std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
 
-                bool isSystemOrAuditField = (lowerName == "createdby" || lowerName == "createdate" || lowerName == "code");
+                bool isSystemOrAuditField = (lowerName == "createdby" || lowerName == "createdate" || lowerName == "code" || lowerName == "name");
 
                 if (!allowed.empty() && !allowed.count(lowerName) && !isSystemOrAuditField) {
                     return;
@@ -400,7 +400,7 @@ namespace omnisphere::types
                 if constexpr (is_optional<FieldType>::value) {
                     if (fieldVal.has_value()) {
                         if constexpr (std::is_same_v<typename FieldType::value_type, std::string>) {
-                            if (fieldVal.value().empty() && lowerName == "code") {
+                            if (fieldVal.value().empty() && (lowerName == "code" || lowerName == "name")) {
                                 return;
                             }
                         }
@@ -409,7 +409,7 @@ namespace omnisphere::types
                     }
                 } else {
                     if constexpr (std::is_same_v<FieldType, std::string>) {
-                        if (fieldVal.empty() && (lowerName == "createdate" || lowerName == "updatedate" || lowerName == "code")) {
+                        if (fieldVal.empty() && (lowerName == "createdate" || lowerName == "updatedate" || lowerName == "code" || lowerName == "name")) {
                             return;
                         }
                     }

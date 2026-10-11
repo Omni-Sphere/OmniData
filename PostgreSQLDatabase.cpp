@@ -234,11 +234,18 @@ namespace omnisphere::data
             throw std::runtime_error(
                 "[PostgreSQLDatabase::RunStatement] Not connected.");
 
-        return WithWork([&](pqxx::work& w)
+        try
         {
-            w.exec(query); // pqxx::work::exec throws pqxx::sql_error on failure
-            return true;
-        });
+            return WithWork([&](pqxx::work& w)
+            {
+                w.exec(query); // pqxx::work::exec throws pqxx::sql_error on failure
+                return true;
+            });
+        }
+        catch (const std::exception& e)
+        {
+            throw std::runtime_error(std::string(e.what()) + "\n[SQL Query]: " + query);
+        }
     }
 
     // ─── RunPrepared ──────────────────────────────────────────────────────────
@@ -254,11 +261,19 @@ namespace omnisphere::data
         const std::string pgQuery = ConvertPlaceholders(query);
         const pqxx::params p      = BuildParams(params);
 
-        return WithWork([&](pqxx::work& w)
+        try
         {
-            w.exec(pgQuery, p);
-            return true;
-        });
+            return WithWork([&](pqxx::work& w)
+            {
+                w.exec(pgQuery, p);
+                return true;
+            });
+        }
+        catch (const std::exception& e)
+        {
+            std::string formattedSql = omnisphere::types::FormatSQL(query, params);
+            throw std::runtime_error(std::string(e.what()) + "\n[SQL Query]: " + formattedSql);
+        }
     }
 
     // ─── FetchPrepared (SQLParam) ─────────────────────────────────────────────
@@ -275,10 +290,18 @@ namespace omnisphere::data
         const std::string pgQuery = ConvertPlaceholders(query);
         const pqxx::params p      = BuildParams(params);
 
-        return WithWork([&](pqxx::work& w)
+        try
         {
-            return ReadResult(w.exec(pgQuery, p));
-        });
+            return WithWork([&](pqxx::work& w)
+            {
+                return ReadResult(w.exec(pgQuery, p));
+            });
+        }
+        catch (const std::exception& e)
+        {
+            std::string formattedSql = omnisphere::types::FormatSQL(query, params);
+            throw std::runtime_error(std::string(e.what()) + "\n[SQL Query]: " + formattedSql);
+        }
     }
 
     // ─── FetchPrepared (vector<string>) ──────────────────────────────────────
@@ -314,10 +337,17 @@ namespace omnisphere::data
             throw std::runtime_error(
                 "[PostgreSQLDatabase::FetchResults] Not connected.");
 
-        return WithWork([&](pqxx::work& w)
+        try
         {
-            return ReadResult(w.exec(query));
-        });
+            return WithWork([&](pqxx::work& w)
+            {
+                return ReadResult(w.exec(query));
+            });
+        }
+        catch (const std::exception& e)
+        {
+            throw std::runtime_error(std::string(e.what()) + "\n[SQL Query]: " + query);
+        }
     }
 
     // ─── Transactions ─────────────────────────────────────────────────────────
