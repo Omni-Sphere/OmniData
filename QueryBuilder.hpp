@@ -135,6 +135,10 @@ namespace omnisphere::types
                 std::string lowerName = rawName;
                 std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
 
+                if (lowerName == "entry" || lowerName == "code") {
+                    return;
+                }
+
                 bool isAuditField = (lowerName == "lastupdatedby" || lowerName == "updatedby" || lowerName == "updatedate");
 
                 if (!allowed.empty() && !allowed.count(lowerName) && !isAuditField) {
@@ -156,6 +160,8 @@ namespace omnisphere::types
                     if (fieldVal.has_value()) {
                         cols.push_back({colName, MakeSQLParam(fieldVal.value())});
                     }
+                } else {
+                    cols.push_back({colName, MakeSQLParam(fieldVal)});
                 }
             }
         );
@@ -459,6 +465,13 @@ namespace omnisphere::types
         {
             setCols.push_back(col.Column);
             result.Parameters.push_back(col.Value);
+        }
+
+        if (setCols.empty())
+        {
+            result.Query = "";
+            result.Parameters.clear();
+            return result;
         }
 
         std::string formattedWhere = whereField;
