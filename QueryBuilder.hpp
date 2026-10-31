@@ -135,7 +135,7 @@ namespace omnisphere::types
                 std::string lowerName = rawName;
                 std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
 
-                if (lowerName == "entry" || lowerName == "code") {
+                if (rawName == "Entry" || lowerName == "entry" || rawName == "Code" || lowerName == "code") {
                     return;
                 }
 
@@ -388,6 +388,10 @@ namespace omnisphere::types
                 std::string rawColName = PropertyDescriptor.name;
                 std::string lowerName = rawColName;
                 std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+
+                if (rawColName == "Entry" || lowerName == "entry") {
+                    return;
+                }
 
                 bool isSystemOrAuditField = (lowerName == "createdby" || lowerName == "createdate" || lowerName == "code" || lowerName == "name");
 
